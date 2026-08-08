@@ -225,8 +225,26 @@ except Exception: pass' 2>/dev/null)
 cmd_off() {
   touch "$OJOGATO_HOME/PAUSED"
   for L in $CAM_SERVICES; do launchctl bootout "gui/$U/$L" 2>/dev/null; done
-  echo "▸ Ojo de Gato OFF — camera light out, no recording, no CPU. Watchdog silenced."
-  echo "  (heartbeat stays loaded but respects the PAUSED flag)"
+  # ffmpeg can take a few seconds to exit after SIGTERM — wait until the camera
+  # processes are actually gone before promising the light is out.
+  i=0
+  while pgrep -f "ojogato-capture|$OJOGATO_HOME/bin/mediamtx" >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -gt 8 ]; then
+      pkill -f "ojogato-capture" 2>/dev/null
+      pkill -f "$OJOGATO_HOME/bin/mediamtx" 2>/dev/null
+      sleep 1
+      break
+    fi
+    sleep 1
+  done
+  if pgrep -f "ojogato-capture" >/dev/null 2>&1; then
+    echo "▸ Ojo de Gato OFF requested, but the capture process is still shutting down —"
+    echo "  check 'ojogato status' in a few seconds."
+  else
+    echo "▸ Ojo de Gato OFF — camera light out, no recording, no CPU. Watchdog silenced."
+    echo "  (heartbeat stays loaded but respects the PAUSED flag)"
+  fi
 }
 
 cmd_on() {
