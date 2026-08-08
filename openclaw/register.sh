@@ -71,14 +71,20 @@ if [ ! -x "$REPORT" ]; then
   echo "         Continuing anyway (registration only writes OpenClaw-side files)."
 fi
 
-# subject for the AGENTS.md text (config.env is shell-sourceable per the Ojo Gato contract)
+# subject + pet names for the AGENTS.md text (config.env is shell-sourceable per the Ojo Gato contract)
 OJOGATO_SUBJECT=""
 OJOGATO_TELEGRAM_CHAT=""
+OJOGATO_PET_NAMES=""
 if [ -f "$CONFIG" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG"
 fi
 SUBJECT="${OJOGATO_SUBJECT:-the camera subject}"
+if [ -n "$OJOGATO_PET_NAMES" ]; then
+  NAMES_LINE="Their names: **${OJOGATO_PET_NAMES}**. Use the names naturally and collectively (\"the trio\", \"no zoomies since 14:32\") — but never attribute motion to one individual; the detector cannot tell them apart, so \"someone did laps\" is honest and naming the runner is a lie."
+else
+  NAMES_LINE="No individual names configured (set OJOGATO_PET_NAMES in ${CONFIG} to add them)."
+fi
 
 # ---- (a) skill ---------------------------------------------------------------
 echo "-- Step a: install skill -> $SKILL_DEST"
@@ -109,7 +115,11 @@ elif confirm "Append the '## Ojo Gato (camera monitor)' section to AGENTS.md?"; 
 ## Ojo Gato (camera monitor)
 
 This machine runs Ojo Gato, a private, deterministic home-camera monitor. It is currently
-watching **${SUBJECT}** (configured as OJOGATO_SUBJECT in ${CONFIG}).
+watching **${SUBJECT}** (configured as OJOGATO_SUBJECT in ${CONFIG}). ${NAMES_LINE}
+
+**Voice:** you are the household's camera companion, not a server log — warm, playful,
+brief; a friend house-sitting. Personality lives in the framing, never in the facts: the
+numbers, times, and states from the script are relayed exactly.
 
 - **On-demand check** — when the user asks about ${SUBJECT}, the camera, or "ojo gato"
   (e.g. "how are the cats", "check on the dog", "how are the plants", "camera check"):
@@ -117,8 +127,8 @@ watching **${SUBJECT}** (configured as OJOGATO_SUBJECT in ${CONFIG}).
 - **The script sends all media itself** — the live snapshot and last-movement clip go
   straight to Telegram. Never attach images and never claim to have seen the frames:
   activity counts come from deterministic motion detection, not from vision.
-- **Digest** (scheduled jobs use this): run \`${REPORT} digest\` and return ONLY the exact
-  command output.
+- **Digest** (scheduled jobs use this): run \`${REPORT} digest\` and return its exact
+  output; you may prepend ONE short line in your own voice, never altering the numbers.
 - **Controls** — \`${CTL} on|off|status\` turns the camera stack on/off or shows service
   state. Only run these when explicitly asked.
 - If the script reports the camera is **paused** or the **stream is down**, say so plainly —
@@ -209,8 +219,9 @@ if os.path.exists(path):
     with open(path) as f:
         data = json.load(f)
 jobs = data if isinstance(data, list) else data.setdefault("jobs", [])
-msg = ("Use the ojo-gato skill. Run `%s digest` with exec and return ONLY the exact "
-       "command output. The script sends the media itself." % report)
+msg = ("Use the ojo-gato skill. Run `%s digest` with exec and return its exact output — "
+       "you may prepend ONE short line in your own voice, but never alter the numbers. "
+       "The script sends the media itself." % report)
 def mkjob(jid, expr):
     return {
         "id": jid,
