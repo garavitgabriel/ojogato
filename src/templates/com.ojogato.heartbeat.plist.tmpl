@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Watchdog: health checks + Telegram alert every 30 min, outside any agent framework.
+     No RunAtLoad: first check fires one interval after login, once the stack has settled. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.heartbeat</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@OJOGATO_HOME@/bin/heartbeat.sh</string>
+  </array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/heartbeat.err</string>
+</dict>
+</plist>

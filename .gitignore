@@ -1,0 +1,13 @@
+# Private predecessor scripts / working reference material — never publish
+.reference/
+
+# Live config (contains the Telegram token) — created by setup, never committed
+config.env
+
+# Runtime output
+*.log
+recordings/
+motionframes/
+
+# macOS
+.DS_Store

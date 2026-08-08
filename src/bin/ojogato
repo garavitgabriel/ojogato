@@ -1,0 +1,430 @@
+#!/bin/bash
+# ojogato — control CLI for Ojo Gato.
+# Usage: ojogato setup|on|off|status|doctor|report|clip|logs|update|uninstall
+
+OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
+CONFIG="$OJOGATO_HOME/config.env"
+LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
+BIN="$OJOGATO_HOME/bin"
+APP="$OJOGATO_HOME/OjoGato.app"
+APP_BIN="$APP/Contents/MacOS/ojogato-capture"
+U=$(id -u)
+
+ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup com.ojogato.heartbeat"
+CAM_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup"
+
+step() { printf '▸ %s\n' "$*"; }
+die()  { printf 'ojogato: %s\n' "$*" >&2; exit 1; }
+
+load_config() {
+  if [ -f "$CONFIG" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG"
+  fi
+}
+
+set_config() { # set_config KEY VALUE — update or append in config.env
+  [ -f "$CONFIG" ] || { touch "$CONFIG"; chmod 600 "$CONFIG"; }
+  if grep -q "^$1=" "$CONFIG"; then
+    sed -i "" "s|^$1=.*|$1=\"$2\"|" "$CONFIG"
+  else
+    echo "$1=\"$2\"" >> "$CONFIG"
+  fi
+}
+
+svc_pid() { launchctl list 2>/dev/null | awk -v l="$1" '$3==l{print $1}'; }
+
+boot_svc() {
+  [ -f "$LAUNCH_AGENTS/$1.plist" ] || { echo "  (missing $1.plist — run install.sh)"; return 1; }
+  launchctl bootstrap "gui/$U" "$LAUNCH_AGENTS/$1.plist" 2>/dev/null
+}
+
+port_open() { ( : </dev/tcp/127.0.0.1/"$1" ) 2>/dev/null; }
+
+# --------------------------------------------------------------------- setup
+cmd_setup() {
+  load_config
+  echo "Ojo Gato guided setup"
+  echo "====================="
+  [ -x "$BIN/ffmpeg" ] || die "no ffmpeg at $BIN/ffmpeg — run install.sh first."
+  [ -f "$CONFIG" ]     || die "no config at $CONFIG — run install.sh first."
+
+  # ---- 1. camera permission -------------------------------------------------
+  echo ""
+  step "Step 1/3 — camera permission"
+  DEV="${OJOGATO_DEVICE:-0}"
+  RES="${OJOGATO_RES:-1280x720}"
+  TESTF="$OJOGATO_HOME/frames/setup-test.jpg"
+
+  grab_via_app() {
+    rm -f "$TESTF"
+    "$APP_BIN" -hide_banner -loglevel error -f avfoundation -framerate 30 \
+      -video_size "$RES" -i "$DEV" -frames:v 1 -q:v 4 "$TESTF" </dev/null >/dev/null 2>&1
+    [ -s "$TESTF" ]
+  }
+
+  if [ ! -x "$APP_BIN" ]; then
+    echo "  OjoGato.app is missing — run install.sh again, then retry setup."
+  elif grab_via_app; then
+    echo "  ✔ Camera permission already granted — a test frame captured fine."
+  else
+    echo "  macOS gates camera access per app. We'll trigger a capture through"
+    echo "  OjoGato.app so the system shows a permission prompt for 'OjoGato'."
+    echo ""
+    echo "  When the dialog appears, click ALLOW."
+    printf '  Press Enter to trigger the camera prompt... '
+    read -r _
+    OK=false
+    for TRY in 1 2 3; do
+      if grab_via_app; then OK=true; break; fi
+      echo ""
+      echo "  No frame landed yet (attempt $TRY/3)."
+      echo "  If you missed the dialog: System Settings → Privacy & Security → Camera → enable OjoGato."
+      echo "  If no dialog appeared at all, check the camera is connected (OJOGATO_DEVICE=\"$DEV\")."
+      printf '  Press Enter to try again... '
+      read -r _
+    done
+    if $OK; then
+      echo "  ✔ Frame captured — camera permission granted."
+    else
+      echo "  ✘ Still no frame. Fix the permission in System Settings, then re-run: ojogato setup"
+    fi
+  fi
+  # restart capture so the streaming service picks up the fresh grant
+  launchctl kickstart -k "gui/$U/com.ojogato.capture" 2>/dev/null
+
+  # ---- 2. telegram ------------------------------------------------------------
+  echo ""
+  step "Step 2/3 — Telegram (alerts + reports)"
+  if [ -n "$OJOGATO_TELEGRAM_TOKEN" ] && [ -n "$OJOGATO_TELEGRAM_CHAT" ]; then
+    printf '  Telegram already configured (chat %s). Reconfigure? [y/N] ' "$OJOGATO_TELEGRAM_CHAT"
+    read -r R
+    case "$R" in y|Y|yes) ;; *) R=skip ;; esac
+  else
+    R=""
+  fi
+
+  if [ "$R" != "skip" ]; then
+    echo "  Create a bot with @BotFather in Telegram (/newbot) if you don't have one."
+    printf '  Paste your bot token (or Enter to skip Telegram): '
+    read -r TOKEN
+    if [ -z "$TOKEN" ]; then
+      echo "  Skipped — reports and the watchdog stay silent until you configure Telegram."
+    else
+      ME=$(curl -s -m 15 "https://api.telegram.org/bot${TOKEN}/getMe")
+      case "$ME" in
+        *'"ok":true'*)
+          BOTNAME=$(echo "$ME" | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')
+          echo "  ✔ Token valid — bot @${BOTNAME:-unknown}"
+          set_config OJOGATO_TELEGRAM_TOKEN "$TOKEN"
+          echo ""
+          echo "  Now open Telegram and send ANY message to @${BOTNAME:-your bot}"
+          echo "  (that lets us discover your chat id)."
+          printf '  Press Enter once you have messaged the bot... '
+          read -r _
+          CHAT=""
+          for TRY in 1 2 3 4 5 6; do
+            UPD=$(curl -s -m 15 "https://api.telegram.org/bot${TOKEN}/getUpdates")
+            if command -v python3 >/dev/null 2>&1; then
+              CHAT=$(echo "$UPD" | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+for u in reversed(d.get("result",[])):
+    m=u.get("message") or u.get("edited_message") or u.get("channel_post")
+    if m and "chat" in m:
+        print(m["chat"]["id"]); break
+' 2>/dev/null)
+            else
+              CHAT=$(echo "$UPD" | grep -o '"chat":{"id":-\{0,1\}[0-9]*' | tail -1 | grep -o '\-\{0,1\}[0-9]*$')
+            fi
+            [ -n "$CHAT" ] && break
+            echo "  no message seen yet — waiting 5s (attempt $TRY/6)..."
+            sleep 5
+          done
+          if [ -n "$CHAT" ]; then
+            set_config OJOGATO_TELEGRAM_CHAT "$CHAT"
+            echo "  ✔ Chat id: $CHAT"
+            # test photo: prefer a live-stream snapshot, fall back to a direct grab
+            SNAP="$OJOGATO_HOME/frames/setup-hello.jpg"
+            rm -f "$SNAP"
+            "$BIN/ffmpeg" -y -loglevel error -rtsp_transport tcp -i rtsp://127.0.0.1:8554/cam \
+              -frames:v 1 -q:v 4 "$SNAP" </dev/null >/dev/null 2>&1
+            [ -s "$SNAP" ] || { [ -x "$APP_BIN" ] && "$APP_BIN" -hide_banner -loglevel error -f avfoundation -framerate 30 -video_size "$RES" -i "$DEV" -frames:v 1 -q:v 4 "$SNAP" </dev/null >/dev/null 2>&1; }
+            if [ -s "$SNAP" ]; then
+              RESP=$(curl -s -m 60 "https://api.telegram.org/bot${TOKEN}/sendPhoto" \
+                -F "chat_id=${CHAT}" -F "photo=@${SNAP}" \
+                -F "caption=Ojo Gato is watching. Setup complete.")
+            else
+              RESP=$(curl -s -m 15 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+                -d "chat_id=${CHAT}" --data-urlencode "text=Ojo Gato connected (no camera frame yet — check 'ojogato doctor').")
+            fi
+            case "$RESP" in
+              *'"ok":true'*) echo "  ✔ Test message sent — check your Telegram." ;;
+              *) echo "  ⚠ Telegram send failed — verify token/chat later with: ojogato doctor" ;;
+            esac
+          else
+            echo "  ✘ Could not discover a chat id. Message the bot, then re-run: ojogato setup"
+          fi
+          ;;
+        *)
+          echo "  ✘ Token rejected by Telegram (getMe failed). Re-run setup with the right token."
+          ;;
+      esac
+    fi
+  fi
+
+  # ---- 3. tailscale / live URL --------------------------------------------------
+  echo ""
+  step "Step 3/3 — live view URL"
+  TS_BIN=""
+  if command -v tailscale >/dev/null 2>&1; then
+    TS_BIN=$(command -v tailscale)
+  elif [ -x "/Applications/Tailscale.app/Contents/MacOS/Tailscale" ]; then
+    TS_BIN="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  fi
+  if [ -n "$TS_BIN" ]; then
+    TS_HOST=""
+    if command -v python3 >/dev/null 2>&1; then
+      TS_HOST=$("$TS_BIN" status --json 2>/dev/null | python3 -c '
+import json,sys
+try: print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))
+except Exception: pass' 2>/dev/null)
+    fi
+    TS_IP=$("$TS_BIN" ip -4 2>/dev/null | head -1)
+    [ -z "$TS_HOST" ] && TS_HOST="$TS_IP"
+    if [ -n "$TS_HOST" ]; then
+      LIVE="http://${TS_HOST}:8889/cam"
+      set_config OJOGATO_LIVE_URL "$LIVE"
+      echo "  ✔ Tailscale found — live view (from any device on your tailnet):"
+      echo "    $LIVE"
+      # If install ran before Tailscale was up, mediamtx.yml still has an empty
+      # webrtcAdditionalHosts — patch it so WebRTC actually plays over the tailnet.
+      MTX_YML="$OJOGATO_HOME/mediamtx.yml"
+      if [ -f "$MTX_YML" ] && grep -q '^webrtcAdditionalHosts: \[\]' "$MTX_YML"; then
+        HOSTS="[$TS_HOST]"
+        [ -n "$TS_IP" ] && [ "$TS_IP" != "$TS_HOST" ] && HOSTS="[$TS_IP, $TS_HOST]"
+        sed -i "" "s|^webrtcAdditionalHosts: \[\]|webrtcAdditionalHosts: $HOSTS|" "$MTX_YML"
+        launchctl kickstart -k "gui/$U/com.ojogato.mediamtx" 2>/dev/null
+        echo "  ✔ mediamtx.yml updated with your tailnet hosts (stream server restarted)"
+      fi
+    else
+      echo "  ⚠ Tailscale installed but not connected (run: tailscale up). Re-run setup after."
+    fi
+  else
+    echo "  ⚠ Tailscale not installed — the stream is reachable on this Mac only:"
+    echo "    http://localhost:8889/cam"
+    echo "  Install Tailscale for private remote viewing (docs/privacy-and-networking.md)."
+  fi
+
+  echo ""
+  step "Setup done. Check everything with: ojogato doctor"
+}
+
+# --------------------------------------------------------------------- on / off
+cmd_off() {
+  touch "$OJOGATO_HOME/PAUSED"
+  for L in $CAM_SERVICES; do launchctl bootout "gui/$U/$L" 2>/dev/null; done
+  echo "▸ Ojo Gato OFF — camera light out, no recording, no CPU. Watchdog silenced."
+  echo "  (heartbeat stays loaded but respects the PAUSED flag)"
+}
+
+cmd_on() {
+  rm -f "$OJOGATO_HOME/PAUSED"
+  boot_svc com.ojogato.mediamtx
+  sleep 2
+  for L in com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup; do
+    boot_svc "$L"
+  done
+  [ -z "$(svc_pid com.ojogato.heartbeat)" ] && boot_svc com.ojogato.heartbeat
+  echo "▸ Ojo Gato ON — stream + recording resuming (give it ~10s)."
+}
+
+# --------------------------------------------------------------------- status
+cmd_status() {
+  load_config
+  if [ -f "$OJOGATO_HOME/PAUSED" ]; then echo "state: PAUSED (ojogato on to resume)"; else echo "state: RUNNING"; fi
+  for L in $ALL_SERVICES; do
+    P=$(svc_pid "$L")
+    echo "  $L: ${P:-stopped}"
+  done
+  N=$(ls -t "$OJOGATO_HOME/recordings"/*.mp4 2>/dev/null | head -1)
+  if [ -n "$N" ]; then
+    echo "  newest recording: $(( ($(date +%s) - $(stat -f %m "$N")) / 60 )) min old"
+  else
+    echo "  newest recording: none yet"
+  fi
+  DU=$(du -sh "$OJOGATO_HOME/recordings" 2>/dev/null | cut -f1)
+  echo "  recordings disk use: ${DU:-0} (cap ${OJOGATO_CAP_GB:-?}GB, retention ${OJOGATO_RETENTION_HOURS:-?}h)"
+  M=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -1)
+  if [ -n "$M" ]; then
+    AGEM=$(( ($(date +%s) - $(stat -f %m "$M")) / 60 ))
+    if [ "$AGEM" -lt 60 ]; then echo "  last motion: ${AGEM} min ago"; else echo "  last motion: $((AGEM/60))h $((AGEM%60))m ago"; fi
+  else
+    echo "  last motion: none recorded yet"
+  fi
+}
+
+# --------------------------------------------------------------------- doctor
+cmd_doctor() {
+  load_config
+  FAILS=0
+  pass() { printf '  ✔ %s\n' "$*"; }
+  fail() { printf '  ✘ %s\n' "$*"; FAILS=$((FAILS + 1)); }
+  note() { printf '  · %s\n' "$*"; }
+
+  echo "ojogato doctor"
+  echo "=============="
+  PAUSED=false
+  [ -f "$OJOGATO_HOME/PAUSED" ] && PAUSED=true
+  $PAUSED && note "PAUSED flag is set — camera services are intentionally off; some checks are skipped."
+
+  # services
+  for L in $ALL_SERVICES; do
+    if $PAUSED && [ "$L" != "com.ojogato.heartbeat" ]; then continue; fi
+    P=$(svc_pid "$L")
+    if [ -n "$P" ]; then
+      pass "$L is loaded (${P})"
+    else
+      fail "$L is not loaded — try 'ojogato on' (or re-run install.sh)"
+    fi
+  done
+
+  if ! $PAUSED; then
+    # stream endpoints
+    if port_open 8554; then pass "RTSP answering on 127.0.0.1:8554"; else fail "nothing listening on 8554 — mediamtx down?"; fi
+    if curl -s -m 3 -o /dev/null "http://127.0.0.1:8888/"; then pass "HLS answering on :8888"; else fail "HLS (:8888) not answering"; fi
+    if curl -s -m 3 -o /dev/null "http://127.0.0.1:8889/"; then pass "WebRTC answering on :8889"; else fail "WebRTC (:8889) not answering"; fi
+
+    # recordings growing
+    N=$(ls -t "$OJOGATO_HOME/recordings"/*.mp4 2>/dev/null | head -1)
+    if [ -z "$N" ]; then
+      fail "no recordings exist — capture never started (camera permission? run 'ojogato setup')"
+    else
+      AGE=$(( ( $(date +%s) - $(stat -f %m "$N") ) / 60 ))
+      if [ "$AGE" -le 15 ]; then
+        pass "recordings are growing (newest is ${AGE} min old)"
+      else
+        fail "newest recording is ${AGE} min old — capture looks stalled ('ojogato logs')"
+      fi
+    fi
+  fi
+
+  # camera TCC grant
+  TCC_DB="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+  AUTH=$(sqlite3 "$TCC_DB" "SELECT auth_value FROM access WHERE service='kTCCServiceCamera' AND client='com.ojogato.capture';" 2>/dev/null)
+  if [ "$AUTH" = "2" ]; then
+    pass "camera permission granted to OjoGato (TCC)"
+  elif [ -n "$AUTH" ]; then
+    fail "camera permission DENIED for OjoGato — System Settings → Privacy & Security → Camera"
+  else
+    # TCC.db unreadable without Full Disk Access — infer from output
+    if ls "$OJOGATO_HOME/recordings"/*.mp4 >/dev/null 2>&1 || ls "$OJOGATO_HOME/motionframes"/*.jpg >/dev/null 2>&1; then
+      pass "camera permission looks granted (frames/recordings exist; TCC db not readable from here)"
+    else
+      fail "cannot confirm camera permission and no frames exist — run 'ojogato setup'"
+    fi
+  fi
+
+  # telegram
+  if [ -n "$OJOGATO_TELEGRAM_TOKEN" ] && [ -n "$OJOGATO_TELEGRAM_CHAT" ]; then
+    pass "Telegram configured (chat $OJOGATO_TELEGRAM_CHAT)"
+  else
+    fail "Telegram not configured — reports and watchdog alerts are silent ('ojogato setup')"
+  fi
+
+  # disk headroom
+  FREE_GB=$(df -g /System/Volumes/Data 2>/dev/null | tail -1 | awk '{print $4}')
+  [ -z "$FREE_GB" ] && FREE_GB=$(df -g "$HOME" 2>/dev/null | tail -1 | awk '{print $4}')
+  if [ -n "$FREE_GB" ] && [ "$FREE_GB" -ge 3 ] 2>/dev/null; then
+    pass "disk headroom ok (${FREE_GB}GB free)"
+  else
+    fail "disk critically low (${FREE_GB:-?}GB free) — lower OJOGATO_CAP_GB or free space"
+  fi
+
+  echo ""
+  if [ "$FAILS" -eq 0 ]; then
+    echo "▸ All checks passed."
+  else
+    echo "▸ $FAILS check(s) failed."
+    exit 1
+  fi
+}
+
+# --------------------------------------------------------------------- misc
+cmd_report() { [ -x "$BIN/report.sh" ] || die "report.sh not installed"; exec "$BIN/report.sh" "$@"; }
+
+cmd_clip() {
+  [ -x "$BIN/clip.sh" ] || die "clip.sh not installed"
+  OUT=$("$BIN/clip.sh")
+  if [ -n "$OUT" ]; then
+    echo "▸ clip of the last movement:"
+    echo "$OUT"
+  else
+    echo "▸ no clip available (no motion recorded yet, or the matching segment is gone)"
+    exit 1
+  fi
+}
+
+cmd_logs() {
+  FILES=$(ls "$OJOGATO_HOME/logs"/*.log "$OJOGATO_HOME/logs"/*.err 2>/dev/null)
+  [ -n "$FILES" ] || die "no log files yet in $OJOGATO_HOME/logs"
+  echo "▸ tailing service logs (ctrl-c to stop)"
+  # shellcheck disable=SC2086
+  exec tail -n 20 -F $FILES
+}
+
+cmd_update() {
+  SRC=$(cat "$OJOGATO_HOME/.install-source" 2>/dev/null)
+  [ -n "$SRC" ] && [ -f "$SRC/install.sh" ] || die "install source unknown or moved — run install.sh from the ojogato repo directly."
+  MODE=$(cat "$OJOGATO_HOME/.install-mode" 2>/dev/null)
+  FLAG=""
+  [ "$MODE" = "link" ] && FLAG="--link"
+  echo "▸ re-running installer from $SRC"
+  exec /bin/bash "$SRC/install.sh" $FLAG
+}
+
+cmd_uninstall() {
+  if [ -x "$OJOGATO_HOME/uninstall.sh" ]; then
+    exec /bin/bash "$OJOGATO_HOME/uninstall.sh" "$@"
+  fi
+  SRC=$(cat "$OJOGATO_HOME/.install-source" 2>/dev/null)
+  [ -n "$SRC" ] && [ -f "$SRC/uninstall.sh" ] && exec /bin/bash "$SRC/uninstall.sh" "$@"
+  die "uninstall.sh not found — run it from the ojogato repo."
+}
+
+usage() {
+  cat <<'EOF'
+ojogato — private self-hosted camera for your space
+
+usage: ojogato <command>
+
+  setup      guided first-run: camera permission, Telegram, live URL
+  on         resume streaming + recording (clears PAUSED)
+  off        stop everything camera-related (privacy mode; watchdog silenced)
+  status     services, newest recording age, disk use, last motion
+  doctor     health checks with plain-English pass/fail
+  report     send a Telegram report now (report.sh)
+  clip       cut a short clip around the last movement, print its path
+  logs       tail -F all service logs
+  update     re-run the installer from the original repo checkout
+  uninstall  remove services (and optionally all data)
+EOF
+}
+
+CMD="$1"
+[ $# -gt 0 ] && shift
+case "$CMD" in
+  setup)     cmd_setup "$@" ;;
+  on)        cmd_on ;;
+  off)       cmd_off ;;
+  status)    cmd_status ;;
+  doctor)    cmd_doctor ;;
+  report)    cmd_report "$@" ;;
+  clip)      cmd_clip ;;
+  logs)      cmd_logs ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall "$@" ;;
+  ""|help|-h|--help) usage ;;
+  *) echo "ojogato: unknown command '$CMD'"; usage; exit 2 ;;
+esac

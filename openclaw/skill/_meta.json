@@ -1,0 +1,8 @@
+{
+  "slug": "ojo-gato",
+  "name": "Ojo Gato",
+  "description": "Check on whatever the Ojo Gato home camera watches (OJOGATO_SUBJECT). Reports deterministic motion-based activity and sends a live snapshot + last-movement clip to Telegram.",
+  "version": "1.0.0",
+  "author": "Gabriel Garavit",
+  "tags": ["home", "camera", "monitoring", "ojogato"]
+}

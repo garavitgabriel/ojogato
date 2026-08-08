@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Retention sweeper: age + size-cap cleanup every 30 min. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.cleanup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@OJOGATO_HOME@/bin/cleanup.sh</string>
+  </array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/cleanup.err</string>
+</dict>
+</plist>

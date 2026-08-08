@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Motion detector: mpdecimate saves one jpg per moment of real change. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.motion</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@OJOGATO_HOME@/bin/motion-run.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/motion.err</string>
+</dict>
+</plist>
