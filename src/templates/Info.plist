@@ -4,12 +4,12 @@
      camera (TCC) permission. install.sh copies ffmpeg to
      OjoGato.app/Contents/MacOS/ojogato-capture (CFBundleExecutable below) and
      ad-hoc signs the bundle; capture-stream.sh execs that binary so camera access
-     is attributed to "Ojo Gato", not to bash or a bare ffmpeg. -->
+     is attributed to "Ojo de Gato", not to bash or a bare ffmpeg. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleName</key><string>OjoGato</string>
-  <key>CFBundleDisplayName</key><string>Ojo Gato</string>
+  <key>CFBundleDisplayName</key><string>Ojo de Gato</string>
   <key>CFBundleIdentifier</key><string>com.ojogato.capture</string>
   <key>CFBundleExecutable</key><string>ojogato-capture</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -17,6 +17,6 @@
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSUIElement</key><true/>
-  <key>NSCameraUsageDescription</key><string>Ojo Gato streams your camera to you privately.</string>
+  <key>NSCameraUsageDescription</key><string>Ojo de Gato streams your camera to you privately.</string>
 </dict>
 </plist>

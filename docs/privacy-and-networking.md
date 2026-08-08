@@ -1,6 +1,6 @@
 # Privacy and networking
 
-Ojo Gato is a camera pointed at the inside of your home. The networking design starts from that fact.
+Ojo de Gato is a camera pointed at the inside of your home. The networking design starts from that fact.
 
 ## The stance
 
@@ -24,7 +24,7 @@ The one deliberate egress is **Telegram**: snapshots, clips, and alerts you aske
 
 ## Never port-forward
 
-Do not forward ports 8888/8889 (or any Ojo Gato port) on your router, and do not put them behind a public reverse proxy. The streams carry live video of your home with no authentication layer of their own — the security model is *network reachability*, and it only holds if reachability stays private. Tailscale gives you remote access without ever opening a port; there is no scenario where port-forwarding is the right tool here.
+Do not forward ports 8888/8889 (or any Ojo de Gato port) on your router, and do not put them behind a public reverse proxy. The streams carry live video of your home with no authentication layer of their own — the security model is *network reachability*, and it only holds if reachability stays private. Tailscale gives you remote access without ever opening a port; there is no scenario where port-forwarding is the right tool here.
 
 If you want to harden further:
 

@@ -6,7 +6,7 @@
 # steps that find nothing to remove just say so.
 #
 # Steps:
-#   a) remove the Ojo Gato marker section from ~/.openclaw/workspace/AGENTS.md
+#   a) remove the Ojo de Gato marker section from ~/.openclaw/workspace/AGENTS.md
 #   b) remove the exec-approvals allowlist entries from agent "main"
 #   c) remove the two ojogato-digest cron jobs (by id)
 #   d) remove the skill dir ~/.openclaw/workspace/skills/ojo-gato/
@@ -47,7 +47,7 @@ backup() {
   return 0
 }
 
-echo "== Ojo Gato -> OpenClaw UNregistration =="
+echo "== Ojo de Gato -> OpenClaw UNregistration =="
 echo "   OpenClaw dir: $OPENCLAW_DIR"
 echo
 
@@ -57,10 +57,10 @@ if [ ! -d "$OPENCLAW_DIR" ]; then
 fi
 
 # ---- (a) AGENTS.md marker section ---------------------------------------------
-echo "-- Step a: remove Ojo Gato section from $AGENTS_MD"
+echo "-- Step a: remove Ojo de Gato section from $AGENTS_MD"
 if [ ! -f "$AGENTS_MD" ] || ! grep -q "$MARKER_BEGIN" "$AGENTS_MD" 2>/dev/null; then
   echo "  no ojogato marker section found — nothing to do."
-elif confirm "Remove the marker-delimited Ojo Gato section from AGENTS.md?"; then
+elif confirm "Remove the marker-delimited Ojo de Gato section from AGENTS.md?"; then
   backup "$AGENTS_MD" || exit 1
   awk -v b="$MARKER_BEGIN" -v e="$MARKER_END" '
     index($0, b) { skip = 1; next }

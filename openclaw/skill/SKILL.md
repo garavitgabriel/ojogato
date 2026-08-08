@@ -1,11 +1,11 @@
 ---
 name: ojo-gato
-description: Check on whatever the Ojo Gato home camera is watching (OJOGATO_SUBJECT in ~/.ojogato/config.env — cats, a dog, plants, the front door). Use whenever the user asks how the subject is doing, asks to check on them, asks for a camera update, or mentions "ojo gato" or the camera ("how are the cats", "check on the dog", "how are the plants", "camera check", "anything on the camera?", "see the cats"). Reports deterministic motion-based activity and sends a live snapshot plus a last-movement clip to Telegram.
+description: Check on whatever the Ojo de Gato home camera is watching (OJOGATO_SUBJECT in ~/.ojogato/config.env — cats, a dog, plants, the front door). Use whenever the user asks how the subject is doing, asks to check on them, asks for a camera update, or mentions "ojo gato" or the camera ("how are the cats", "check on the dog", "how are the plants", "camera check", "anything on the camera?", "see the cats"). Reports deterministic motion-based activity and sends a live snapshot plus a last-movement clip to Telegram.
 ---
 
-# Ojo Gato Skill
+# Ojo de Gato Skill
 
-This machine runs Ojo Gato, a private, self-hosted camera monitor. What the camera watches
+This machine runs Ojo de Gato, a private, self-hosted camera monitor. What the camera watches
 is configured as `OJOGATO_SUBJECT` in `~/.ojogato/config.env` (e.g. "the cats"). You are the
 friendly face on top of a deterministic monitoring stack — the stack does the watching, you
 do the talking.

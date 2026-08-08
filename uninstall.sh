@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ojo Gato uninstaller.
+# Ojo de Gato uninstaller.
 # Usage: ./uninstall.sh [--yes]
 #   Stops and removes the launchd services, then (optionally, with a prompt)
 #   deletes ~/.ojogato — recordings, config, binaries, everything.
@@ -19,7 +19,7 @@ for a in "$@"; do
   esac
 done
 
-echo "Ojo Gato uninstaller"
+echo "Ojo de Gato uninstaller"
 
 printf '▸ %s\n' "Stopping and removing launchd services"
 for L in $SERVICES; do

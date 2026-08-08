@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ojo Gato installer — macOS v1.
+# Ojo de Gato installer — macOS v1.
 # Usage: ./install.sh [--dry-run] [--link] [--yes]
 #   --dry-run   print every action without doing anything
 #   --link      dev mode: symlink src/bin scripts into ~/.ojogato/bin instead of copying
@@ -55,13 +55,13 @@ confirm() {
 
 # ---------------------------------------------------------------- platform gate
 if [ "$(uname -s)" != "Darwin" ]; then
-  echo "Ojo Gato v1 runs on macOS only (it is built on launchd + avfoundation)."
+  echo "Ojo de Gato v1 runs on macOS only (it is built on launchd + avfoundation)."
   echo "Linux/VPS support (RTSP camera input + systemd units) is on the roadmap:"
   echo "  docs/roadmap.md"
   exit 1
 fi
 
-echo "Ojo Gato installer"
+echo "Ojo de Gato installer"
 $DRY_RUN  && echo "(dry-run: printing actions, changing nothing)"
 $LINK_MODE && echo "(dev mode: scripts will be symlinked to the repo)"
 
@@ -71,7 +71,7 @@ step "Preflight checks"
 OS_VER=$(sw_vers -productVersion 2>/dev/null)
 OS_MAJOR=$(echo "$OS_VER" | cut -d. -f1)
 if [ -n "$OS_MAJOR" ] && [ "$OS_MAJOR" -lt 12 ] 2>/dev/null; then
-  warn "macOS $OS_VER detected — Ojo Gato is tested on macOS 12+ (hardware H.264 encode, modern launchctl)."
+  warn "macOS $OS_VER detected — Ojo de Gato is tested on macOS 12+ (hardware H.264 encode, modern launchctl)."
   confirm "Continue anyway?" || die "Aborted."
 else
   info "macOS $OS_VER — ok"

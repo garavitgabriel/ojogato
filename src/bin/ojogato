@@ -1,5 +1,5 @@
 #!/bin/bash
-# ojogato — control CLI for Ojo Gato.
+# ojogato — control CLI for Ojo de Gato.
 # Usage: ojogato setup|on|off|status|doctor|report|clip|logs|update|uninstall
 
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
@@ -44,7 +44,7 @@ port_open() { ( : </dev/tcp/127.0.0.1/"$1" ) 2>/dev/null; }
 # --------------------------------------------------------------------- setup
 cmd_setup() {
   load_config
-  echo "Ojo Gato guided setup"
+  echo "Ojo de Gato guided setup"
   echo "====================="
   [ -x "$BIN/ffmpeg" ] || die "no ffmpeg at $BIN/ffmpeg — run install.sh first."
   [ -f "$CONFIG" ]     || die "no config at $CONFIG — run install.sh first."
@@ -154,10 +154,10 @@ for u in reversed(d.get("result",[])):
             if [ -s "$SNAP" ]; then
               RESP=$(curl -s -m 60 "https://api.telegram.org/bot${TOKEN}/sendPhoto" \
                 -F "chat_id=${CHAT}" -F "photo=@${SNAP}" \
-                -F "caption=Ojo Gato is watching. Setup complete.")
+                -F "caption=Ojo de Gato is watching. Setup complete.")
             else
               RESP=$(curl -s -m 15 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-                -d "chat_id=${CHAT}" --data-urlencode "text=Ojo Gato connected (no camera frame yet — check 'ojogato doctor').")
+                -d "chat_id=${CHAT}" --data-urlencode "text=Ojo de Gato connected (no camera frame yet — check 'ojogato doctor').")
             fi
             case "$RESP" in
               *'"ok":true'*) echo "  ✔ Test message sent — check your Telegram." ;;
@@ -225,7 +225,7 @@ except Exception: pass' 2>/dev/null)
 cmd_off() {
   touch "$OJOGATO_HOME/PAUSED"
   for L in $CAM_SERVICES; do launchctl bootout "gui/$U/$L" 2>/dev/null; done
-  echo "▸ Ojo Gato OFF — camera light out, no recording, no CPU. Watchdog silenced."
+  echo "▸ Ojo de Gato OFF — camera light out, no recording, no CPU. Watchdog silenced."
   echo "  (heartbeat stays loaded but respects the PAUSED flag)"
 }
 
@@ -237,7 +237,7 @@ cmd_on() {
     boot_svc "$L"
   done
   [ -z "$(svc_pid com.ojogato.heartbeat)" ] && boot_svc com.ojogato.heartbeat
-  echo "▸ Ojo Gato ON — stream + recording resuming (give it ~10s)."
+  echo "▸ Ojo de Gato ON — stream + recording resuming (give it ~10s)."
 }
 
 # --------------------------------------------------------------------- status

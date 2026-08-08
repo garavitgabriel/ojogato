@@ -1,6 +1,6 @@
 # OpenClaw integration
 
-Ojo Gato works standalone over Telegram. Connecting it to an [OpenClaw](https://openclaw.ai) agent is the flagship extra: instead of running commands, you just ask your agent about the space and it answers in its own voice — backed entirely by the deterministic pipeline.
+Ojo de Gato works standalone over Telegram. Connecting it to an [OpenClaw](https://openclaw.ai) agent is the flagship extra: instead of running commands, you just ask your agent about the space and it answers in its own voice — backed entirely by the deterministic pipeline.
 
 ## What `register.sh` does
 
@@ -14,7 +14,7 @@ It wires four things into your OpenClaw installation. **Every file it touches ge
 
 1. **Installs the skill.** A skill (SKILL.md + runner) lands in your OpenClaw workspace so the agent knows when and how to check the camera. The runner is thin — it just calls `~/.ojogato/bin/report.sh`; all logic stays in the pipeline.
 
-2. **Appends an Ojo Gato section to `~/.openclaw/workspace/AGENTS.md`.** This teaches the agent the ground rules: what the camera setup is, what the report output means, and what it may and may not claim (see "The honesty rule" below).
+2. **Appends an Ojo de Gato section to `~/.openclaw/workspace/AGENTS.md`.** This teaches the agent the ground rules: what the camera setup is, what the report output means, and what it may and may not claim (see "The honesty rule" below).
 
 3. **Adds exec-approvals allowlist entries** for the ojogato scripts to agent `main`, so the agent can run the report without a manual approval prompt every time — and can run *only* those scripts, nothing broader.
 

@@ -1,8 +1,8 @@
-# Ojo Gato
+# Ojo de Gato
 
 **Give your OpenClaw agent eyes.** A private, self-hosted camera monitor for the space (and pets) you care about.
 
-Ojo Gato ("cat eye" in Spanish) turns a Mac with a camera into a monitoring station you talk to over Telegram — directly, or through your OpenClaw agent.
+Ojo de Gato ("cat eye" in Spanish) turns a Mac with a camera into a monitoring station you talk to over Telegram — directly, or through your OpenClaw agent.
 
 ## What you get
 

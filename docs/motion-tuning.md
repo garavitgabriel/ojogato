@@ -1,6 +1,6 @@
 # Motion tuning
 
-Ojo Gato's activity stats are only as honest as the motion detector. This page covers how detection works, how it goes wrong (the phantom-motion story), which knobs fix it, and how to prove your settings are right.
+Ojo de Gato's activity stats are only as honest as the motion detector. This page covers how detection works, how it goes wrong (the phantom-motion story), which knobs fix it, and how to prove your settings are right.
 
 ## How detection works
 

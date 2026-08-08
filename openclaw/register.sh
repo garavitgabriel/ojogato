@@ -1,13 +1,13 @@
 #!/bin/bash
-# ojogato/register.sh — wire Ojo Gato into a local OpenClaw install.
+# ojogato/register.sh — wire Ojo de Gato into a local OpenClaw install.
 #
-# Run this ON the machine that hosts OpenClaw (the same machine running Ojo Gato).
+# Run this ON the machine that hosts OpenClaw (the same machine running Ojo de Gato).
 # Every step asks for explicit y/N consent, and every file it touches gets a
 # timestamped .bak first. Idempotent — safe to re-run.
 #
 # Steps:
 #   a) copy the ojo-gato skill        -> ~/.openclaw/workspace/skills/ojo-gato/
-#   b) append the Ojo Gato section    -> ~/.openclaw/workspace/AGENTS.md   (marker pair)
+#   b) append the Ojo de Gato section    -> ~/.openclaw/workspace/AGENTS.md   (marker pair)
 #   c) exec-approvals allowlist       -> ~/.openclaw/exec-approvals.json   (agent "main")
 #   d) OPTIONAL: two digest cron jobs -> ~/.openclaw/cron/jobs.json
 #   e) print gateway-restart instructions (never restarts anything itself)
@@ -51,9 +51,9 @@ backup() {
   return 0
 }
 
-echo "== Ojo Gato -> OpenClaw registration =="
+echo "== Ojo de Gato -> OpenClaw registration =="
 echo "   OpenClaw dir: $OPENCLAW_DIR"
-echo "   Ojo Gato dir: $OJOGATO_HOME"
+echo "   Ojo de Gato dir: $OJOGATO_HOME"
 echo
 
 # ---- sanity checks -----------------------------------------------------------
@@ -67,11 +67,11 @@ if [ ! -d "$SKILL_SRC" ]; then
   exit 1
 fi
 if [ ! -x "$REPORT" ]; then
-  echo "WARNING: $REPORT is missing or not executable — install Ojo Gato first (./install.sh)."
+  echo "WARNING: $REPORT is missing or not executable — install Ojo de Gato first (./install.sh)."
   echo "         Continuing anyway (registration only writes OpenClaw-side files)."
 fi
 
-# subject + pet names for the AGENTS.md text (config.env is shell-sourceable per the Ojo Gato contract)
+# subject + pet names for the AGENTS.md text (config.env is shell-sourceable per the Ojo de Gato contract)
 OJOGATO_SUBJECT=""
 OJOGATO_TELEGRAM_CHAT=""
 OJOGATO_PET_NAMES=""
@@ -103,18 +103,18 @@ fi
 echo
 
 # ---- (b) AGENTS.md section ----------------------------------------------------
-echo "-- Step b: Ojo Gato section in $AGENTS_MD"
+echo "-- Step b: Ojo de Gato section in $AGENTS_MD"
 if grep -q "$MARKER_BEGIN" "$AGENTS_MD" 2>/dev/null; then
   echo "  marker already present — skipping (idempotent). Use unregister.sh to remove/refresh."
-elif confirm "Append the '## Ojo Gato (camera monitor)' section to AGENTS.md?"; then
+elif confirm "Append the '## Ojo de Gato (camera monitor)' section to AGENTS.md?"; then
   mkdir -p "$(dirname "$AGENTS_MD")"
   backup "$AGENTS_MD" || exit 1
   {
     printf '\n%s\n' "$MARKER_BEGIN"
     cat <<EOF
-## Ojo Gato (camera monitor)
+## Ojo de Gato (camera monitor)
 
-This machine runs Ojo Gato, a private, deterministic home-camera monitor. It is currently
+This machine runs Ojo de Gato, a private, deterministic home-camera monitor. It is currently
 watching **${SUBJECT}** (configured as OJOGATO_SUBJECT in ${CONFIG}). ${NAMES_LINE}
 
 **Voice:** you are the household's camera companion, not a server log — warm, playful,
@@ -204,7 +204,7 @@ TZ_NAME=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
 echo "   schedule: 09:00 + 21:00 daily, tz=$TZ_NAME, delivered to Telegram chat '${OJOGATO_TELEGRAM_CHAT:-<unset>}'"
 if [ -z "$OJOGATO_TELEGRAM_CHAT" ]; then
   echo "  OJOGATO_TELEGRAM_CHAT is not set in $CONFIG — skipping cron jobs."
-  echo "  Set it (Ojo Gato's Telegram wizard fills it) and re-run register.sh to add them."
+  echo "  Set it (Ojo de Gato's Telegram wizard fills it) and re-run register.sh to add them."
 elif confirm "Add the two ojogato-digest cron jobs?"; then
   if ! command -v python3 >/dev/null 2>&1; then
     echo "ERROR: python3 not found — cannot edit JSON safely. Skipping cron jobs."

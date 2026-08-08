@@ -60,7 +60,7 @@ NOW=$(date +%s)
 mkdir -p "$OJOGATO_HOME/logs"
 echo "$NOW" > "$STATE"
 
-MSG="⚠️ [Ojo Gato watchdog — automated] issue on $(hostname -s):
+MSG="⚠️ [Ojo de Gato watchdog — automated] issue on $(hostname -s):
 $(printf ' • %s\n' "${PROBLEMS[@]}")"
 
 if [ -z "${OJOGATO_TELEGRAM_TOKEN}" ] || [ -z "${OJOGATO_TELEGRAM_CHAT}" ]; then

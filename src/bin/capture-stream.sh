@@ -8,7 +8,7 @@
 #  - Capture at the camera's native 30fps, then downsample with fps=N in the filter;
 #    asking avfoundation for a low framerate directly fails on most devices.
 #  - Prefers the ffmpeg inside OjoGato.app so macOS TCC attributes the camera
-#    access to the Ojo Gato bundle (the permission the user granted at setup).
+#    access to the Ojo de Gato bundle (the permission the user granted at setup).
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 source "$OJOGATO_HOME/config.env"
 

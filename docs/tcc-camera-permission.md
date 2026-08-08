@@ -1,4 +1,4 @@
-# Why headless camera access fails silently on macOS — and how Ojo Gato fixes it
+# Why headless camera access fails silently on macOS — and how Ojo de Gato fixes it
 
 This is the single biggest trap in building a camera monitor on macOS. Everything works when you test in Terminal, then produces zero frames the moment launchd runs it. No error, no prompt, no log line — just an empty stream.
 
@@ -16,10 +16,10 @@ Three consequences, each of which bites in order:
 
 ## The fix: a real (tiny) app bundle, ad-hoc signed
 
-Ojo Gato's installer builds a minimal app bundle at `~/.ojogato/OjoGato.app`:
+Ojo de Gato's installer builds a minimal app bundle at `~/.ojogato/OjoGato.app`:
 
 - **Bundle id:** `com.ojogato.capture` — this is the identity TCC stores the grant against.
-- **`NSCameraUsageDescription`:** "Ojo Gato streams your camera to you privately." — required in Info.plist for the permission dialog to appear at all.
+- **`NSCameraUsageDescription`:** "Ojo de Gato streams your camera to you privately." — required in Info.plist for the permission dialog to appear at all.
 - **Ad-hoc code signature** (`codesign -s -`) — no Apple Developer account needed. Ad-hoc signing is enough to give the bundle a stable code identity on the machine where it was signed, which is exactly what TCC needs.
 
 The capture pipeline runs ffmpeg *through* this bundle, so every camera request — foreground or launchd — is attributed to `com.ojogato.capture`.
@@ -29,7 +29,7 @@ The capture pipeline runs ffmpeg *through* this bundle, so every camera request 
 During `ojogato setup`, the installer runs a short **foreground** test capture through OjoGato.app. Because it's foreground, macOS can show the dialog:
 
 > "OjoGato" would like to access the camera.
-> *Ojo Gato streams your camera to you privately.*
+> *Ojo de Gato streams your camera to you privately.*
 
 Click **Allow** once. The grant is stored against `com.ojogato.capture` and from then on the launchd services capture headlessly, across reboots, with the lid open and nobody logged into the GUI session doing anything.
 
