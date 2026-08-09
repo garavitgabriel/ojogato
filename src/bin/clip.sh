@@ -25,16 +25,22 @@ TIMES=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -200 | while
 done | sort -n)
 [ -z "$TIMES" ] && exit 0
 
-# Find the last burst: frames <= 10s apart belong to one event. Prefer the most recent
-# burst with >= 2 frames (real movement); fall back to the newest single frame.
+# Find the last burst: frames <= OJOGATO_BURST_GAP seconds apart belong to one event.
+# Prefer the most recent burst with >= OJOGATO_BURST_MIN frames (real movement);
+# fall back to the newest single frame.
+# Gap default is 4s (was 10s): real events produce consecutive-second frames, while
+# residual auto-exposure false positives land as isolated frames 5-10s apart — a 10s
+# gap let two of those pair up into a fake "burst" and clip an empty room.
+GAP="${OJOGATO_BURST_GAP:-4}"
+BMIN="${OJOGATO_BURST_MIN:-2}"
 B_START=""; B_END=""; C_START=""; C_END=""; C_N=0; PREV=0
 for t in $TIMES; do
-  if [ "$PREV" -ne 0 ] && [ $(( t - PREV )) -le 10 ]; then
+  if [ "$PREV" -ne 0 ] && [ $(( t - PREV )) -le "$GAP" ]; then
     C_END=$t; C_N=$(( C_N + 1 ))
   else
     C_START=$t; C_END=$t; C_N=1
   fi
-  if [ "$C_N" -ge 2 ]; then B_START=$C_START; B_END=$C_END; fi
+  if [ "$C_N" -ge "$BMIN" ]; then B_START=$C_START; B_END=$C_END; fi
   PREV=$t
 done
 if [ -z "$B_START" ]; then B_START=$C_START; B_END=$C_END; fi
