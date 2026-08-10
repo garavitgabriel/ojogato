@@ -281,6 +281,26 @@ cmd_status() {
   else
     echo "  last motion: none recorded yet"
   fi
+  # Detector liveness is reported separately from "last motion" on purpose: a quiet room
+  # and a wedged pipeline both read as no recent motion, and only this line separates them.
+  A="$OJOGATO_HOME/frames/detector-alive.jpg"
+  if [ -s "$A" ]; then
+    AGEA=$(( $(date +%s) - $(stat -f %m "$A") ))
+    if [ "$AGEA" -le "${OJOGATO_DETECTOR_STALL_SEC:-180}" ]; then
+      echo "  detector: alive (last frame ${AGEA}s ago)"
+    else
+      echo "  detector: STALLED — no frame in ${AGEA}s (heartbeat restarts it within 5 min)"
+    fi
+  else
+    echo "  detector: liveness unknown (no detector-alive.jpg yet)"
+  fi
+  if [ -f "$OJOGATO_HOME/profile.env" ]; then
+    # shellcheck disable=SC1090
+    ( source "$OJOGATO_HOME/profile.env"
+      echo "  motion profile: ${OJOGATO_ACTIVE_PROFILE} (luma ${OJOGATO_PROFILE_YAVG:-?}, hi=${OJOGATO_MOTION_HI} lo=${OJOGATO_MOTION_LO}, set ${OJOGATO_PROFILE_AT})" )
+  else
+    echo "  motion profile: none yet (mode=${OJOGATO_PROFILE_MODE:-auto})"
+  fi
 }
 
 # --------------------------------------------------------------------- doctor

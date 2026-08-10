@@ -4,6 +4,48 @@ All notable changes to Ojo de Gato are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] — 2026-08-10
+
+Fixes a silent 12h45m blackout: the detector reported no movement all morning while a
+person walked through the room repeatedly. Not a tuning problem — replaying the exact same
+filter chain against recordings of the same minutes kept 62 frames. The ffmpeg process was
+alive, its RTSP socket connected and its decoder burning CPU, but its filter graph had
+stalled on an input-timestamp discontinuity: RTSP's 32-bit 90 kHz clock wraps about every
+13h15m, and to `fps` a wrap looks like time jumping backwards by hours, after which it
+drops every frame waiting for a source time that never arrives.
+
+The deeper problem was that nothing could have noticed. A wedged detector and an empty room
+produce the identical observable — zero motion frames — so every existing check read
+healthy. This release adds a signal that separates them.
+
+### Added
+- `frames/detector-alive.jpg`: written unconditionally every `OJOGATO_DETECTOR_ALIVE_SEC`
+  (default 30) from a second detector output taken before mpdecimate. A fresh mtime proves
+  decode + filter + mux are all still moving, whatever the room is doing.
+- Detector watchdog in `heartbeat.sh`: restarts the motion service when that frame goes
+  older than `OJOGATO_DETECTOR_STALL_SEC` (default 180) and reports having done it. Rate
+  limited to one restart per 15 min so a stream that cannot come up isn't kicked in a loop.
+- **Day/night motion profiles**, chosen by measured light rather than by the clock.
+  `motion-profile.sh` samples mean luma (reusing the liveness frame, so it costs nothing),
+  applies hysteresis between `OJOGATO_DARK_YAVG` and the new `OJOGATO_LIT_YAVG`, writes
+  `~/.ojogato/profile.env`, and restarts the detector only when the regime actually changed.
+  `OJOGATO_PROFILE_MODE` = `auto` (default) | `schedule` | `day` | `night` | `off`; night
+  thresholds via `OJOGATO_NIGHT_MOTION_{HI,LO,FRAC,PREFILTER}` (72/36/0.6).
+  `motion-profile.sh --print` shows the decision without applying it.
+- `ojogato status` prints a `detector:` liveness line and the active motion profile,
+  deliberately separate from `last motion`.
+
+### Changed
+- Detector input takes `-use_wallclock_as_timestamps 1`, making the filter graph immune to
+  any source-timestamp wrap, reset, or reconnect.
+- `com.ojogato.heartbeat` interval 1800s → 300s: it now owns the stall check, and half an
+  hour of a blind camera is half an hour of missed cats. A clean pass reads one still frame
+  and exits; Telegram alerts stay rate-limited to one per 3h.
+- docs/motion-tuning.md: sections on the wedged-detector failure mode and on why the profile
+  switch keys on light, with the measured sweep behind both. The load-bearing number: a lit
+  room at 21:00 (luma 40) keeps 8 frames of a real person on the day profile and 4 on the
+  night one — a clock-driven switch would have halved a true event.
+
 ## [0.1.2] — 2026-08-09
 
 Fixes "last movement" clips that showed an empty room even when the detector had

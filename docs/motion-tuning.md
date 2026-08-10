@@ -125,6 +125,70 @@ ls -l /tmp/s-*.jpg
 
 A related trap the wider window exposed: a clip whose window straddles a segment boundary must be cut across **both** files. Cutting from only the segment holding the window's start silently truncates the clip to whatever little of that file remained. `clip.sh` feeds every overlapping segment through the concat demuxer.
 
+## The failure that looks like nothing at all: a wedged detector
+
+Every failure above is the detector saying too much. This one is the detector saying nothing, and it is harder to catch precisely because silence is also what a quiet room looks like.
+
+On 2026-08-10 the reference install reported no movement all morning while a person walked through the room repeatedly. Nothing was misconfigured. The evidence:
+
+- Last motion frame written **23:51:53** the night before; **zero** in the following 12h45m.
+- The ffmpeg process was alive, its RTSP socket ESTABLISHED, its decoder threads accumulating CPU the whole time.
+- Replaying the **same** filter chain against the recordings of the **same** minutes kept **62 frames** on the segment covering the person's crossing.
+
+Right settings, live stream, running process, no output. The filter graph had stalled while everything around it kept working.
+
+The mechanism is a timestamp discontinuity. RTSP carries a 32-bit 90 kHz clock, which wraps roughly every **13 hours 15 minutes**. To the `fps` filter a wrap looks like time jumping backwards by hours, and `fps` responds by dropping frames until source time catches up to what it has already emitted — which, after a jump that size, is never. The recorder never noticed, because `-c copy` runs no filter graph.
+
+Two defenses ship enabled, because the class of bug matters more than this instance of it:
+
+1. **`-use_wallclock_as_timestamps 1` on the detector's input.** Frames are stamped when they arrive rather than by whatever the source claims, so no wrap, reset, or reconnect can move the filter graph's clock backwards.
+2. **A liveness frame plus a watchdog.** The detector writes `frames/detector-alive.jpg` every `OJOGATO_DETECTOR_ALIVE_SEC` (default 30) from a second output taken *before* mpdecimate, unconditionally. `heartbeat.sh` runs every 5 minutes, restarts the detector when that file goes older than `OJOGATO_DETECTOR_STALL_SEC` (default 180), and says so in the alert. Defense 1 addresses the cause we found; defense 2 covers the ones we haven't.
+
+Why a liveness frame is necessary at all, stated plainly: **"no motion frames" cannot distinguish a wedged detector from an empty room**, so no amount of watching `motionframes/` would have caught this. The unconditional frame is the only signal that separates them. `ojogato status` prints it as a `detector:` line next to `last motion`; they mean different things.
+
+If you ever see a long, suspiciously clean run of zeros:
+
+```sh
+ojogato status                      # detector: alive / STALLED
+tail ~/.ojogato/logs/profile.log    # profile switches and automatic restarts
+```
+
+## Day and night: two profiles, chosen by light rather than by clock
+
+The detector's correct sensitivity depends on how much light the sensor has, and that is not a function of the time of day. `motion-profile.sh` measures mean luma every 5 minutes (reusing the liveness frame, so it costs nothing) and switches the detector between a **day** and a **night** threshold set.
+
+Measured on the reference camera — kept frames over 10-minute segments:
+
+| Window | Mean luma | 48/24 (day) | 72/36 (night) | 96/48 |
+|---|---|---|---|---|
+| Daylight, person walking through | ~90 | **62** | — | — |
+| Daylight, verified empty | ~90 | 1 | — | — |
+| Dim, lights just out | 11 | 6 | 3 | 3 |
+| Deep night, 02:00–05:00 | ~2 | 1 | 1 | 1 |
+| **21:00, lamp on, person present** | **40** | **8** | **4** | **3** |
+
+The last row is the whole argument. At that hour a clock-driven switch would have been in "night" mode and thrown away half the frames of a real person. The room was lit — luma 40 — so a light-driven switch correctly keeps it on the day profile. The converse holds too: a shuttered room at 15:00 is the night regime no matter what the clock says.
+
+Note also that deep darkness produces **no** false frames at any threshold on this camera. The night profile earns its keep only in the dim band around luma 7–15, where gain is high but the sensor hasn't bottomed out — a real gain, and a modest one. It is not a fix for night; nothing is, without IR.
+
+```
+OJOGATO_PROFILE_MODE="auto"     # auto (luma) | schedule (clock) | day | night | off
+OJOGATO_DARK_YAVG="16"          # below -> night
+OJOGATO_LIT_YAVG="24"           # above -> day; between, the current profile holds
+OJOGATO_NIGHT_MOTION_HI="72"
+OJOGATO_NIGHT_MOTION_LO="36"
+OJOGATO_NIGHT_MOTION_FRAC="0.6"
+```
+
+The gap between `DARK` and `LIT` is hysteresis, and it is not decoration: a single threshold flaps at dusk, and every flap restarts the detector. The active profile is written to `~/.ojogato/profile.env` (generated — edit `config.env` instead), sourced by `motion-run.sh` after `config.env`, and shown by `ojogato status`. Inspect the decision without changing anything:
+
+```sh
+~/.ojogato/bin/motion-profile.sh --print
+# mode=auto luma=91.2 (via detector-alive.jpg) dark<16 lit>24 current=day -> day
+```
+
+Set `OJOGATO_PROFILE_MODE="off"` to go back to a single profile driven only by `OJOGATO_MOTION_*`.
+
 ## Darkness: the regime where the numbers stop meaning anything
 
 There is no IR illumination. Once the lights go out the sensor runs at maximum gain and the frame is essentially black — mean luma around **8/255**, against roughly **43** for the same room lit. At that gain the picture is mostly grain, and grain is exactly what `mpdecimate` is built to notice, so counts drift up while the footage shows nothing a human could identify.

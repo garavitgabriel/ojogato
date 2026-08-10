@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Watchdog: health checks + Telegram alert every 30 min, outside any agent framework.
+<!-- Supervisor: lighting-profile switch + detector watchdog + health alerts, outside any agent
+     framework. Every 5 min, not 30: it now owns the detector-stall check, and half an hour of a
+     blind camera is half an hour of missed cats. A pass with nothing wrong reads one still frame
+     and exits; Telegram alerts stay rate-limited to one per 3h inside heartbeat.sh.
      No RunAtLoad: first check fires one interval after login, once the stack has settled. -->
 <plist version="1.0">
 <dict>
@@ -10,7 +13,7 @@
     <string>/bin/bash</string>
     <string>@OJOGATO_HOME@/bin/heartbeat.sh</string>
   </array>
-  <key>StartInterval</key><integer>1800</integer>
+  <key>StartInterval</key><integer>300</integer>
   <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/heartbeat.err</string>
 </dict>
 </plist>
