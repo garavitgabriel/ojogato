@@ -38,9 +38,23 @@ SNAP="$OJOGATO_HOME/frames/snap-$(date +%H%M%S).jpg"
 "$FFMPEG" -y -loglevel error -rtsp_transport tcp -i rtsp://127.0.0.1:8554/cam \
   -frames:v 1 -q:v 4 -update 1 "$SNAP" 2>/dev/null
 
+# Is the room actually lit? At max sensor gain a near-black frame is mostly grain, and
+# mpdecimate counts grain as change — so motion counts inflate in the dark while the
+# footage shows nothing. Measured: ~8/255 lights-out vs ~43 lit. Say which regime we
+# are in instead of presenting a dark-inflated count as if it were cats.
+SNAP_YAVG=""
+if [ -s "$SNAP" ]; then
+  SNAP_YAVG=$("$FFMPEG" -v info -i "$SNAP" -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-" \
+    -f null - 2>/dev/null | grep -o 'YAVG=[0-9.]*' | cut -d= -f2 | head -1)
+fi
+DARK=0
+if [ -n "$SNAP_YAVG" ] && awk "BEGIN{exit !($SNAP_YAVG < ${OJOGATO_DARK_YAVG:-16})}"; then DARK=1; fi
+
 if [ "$MODE" = "digest" ]; then LEAD="$EMOJI Digest on ${SUBJECT} ($(date '+%a %H:%M'))"
 else LEAD="$EMOJI Checking on ${SUBJECT} ($(date '+%H:%M'))"; fi
 CAP="$LEAD: ${LASTSEEN}. Activity — ${MF6} motion moments last 6h, ${MF12} last 12h."
+if [ "$DARK" = "1" ]; then CAP="$CAP
+🌑 Lights are off — no night vision, so counts run high on sensor noise and clips show nothing."; fi
 if [ -n "${OJOGATO_LIVE_URL}" ]; then CAP="$CAP
 ▶️ Watch live: ${OJOGATO_LIVE_URL} (needs Tailscale)"; fi
 
@@ -61,12 +75,30 @@ else
 fi
 
 # Short clip of the last real movement (shows the subject, not a guessed still).
-LM=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -1)
-CT=""; if [ -n "$LM" ]; then b=$(basename "$LM"); CT="${b:9:2}:${b:11:2}"; fi
+# The timestamp comes from clip.sh's lag-corrected event time, NOT the newest motion
+# frame's filename — frame filenames trail the real event by ~6s (see clip.sh), so the
+# old caption named a moment several seconds after the subject had already left.
 CLIP=$("$BIN/clip.sh" 2>/dev/null)
+META="$OJOGATO_HOME/frames/lastmove.meta"
+CT=""; CLIP_YAVG=""
+if [ -f "$META" ]; then
+  CT=$(grep -oE 'CLIP_EVENT_HHMM=.*' "$META" | cut -d= -f2)
+  CLIP_YAVG=$(grep -oE 'CLIP_YAVG=[0-9.]*' "$META" | cut -d= -f2)
+fi
+if [ -z "$CT" ]; then
+  LM=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -1)
+  if [ -n "$LM" ]; then b=$(basename "$LM"); CT="${b:9:2}:${b:11:2}"; fi
+fi
 if [ -n "$CLIP" ] && [ -s "$CLIP" ]; then
+  VCAP="🎥 Last movement — ${CT}"
+  # No IR: below the dark threshold nothing in the clip is actually visible, so say so
+  # rather than shipping a black video that reads as a camera fault.
+  if [ -n "$CLIP_YAVG" ] && awk "BEGIN{exit !($CLIP_YAVG < ${OJOGATO_DARK_YAVG:-16})}"; then
+    VCAP="$VCAP
+🌑 Room was dark — nothing is visible in this clip. Leave a light on for usable night footage."
+  fi
   curl -s -F chat_id="$OJOGATO_TELEGRAM_CHAT" -F video=@"$CLIP" \
-    -F caption="🎥 Last movement — ${CT}" "$API/sendVideo" >/dev/null
+    -F caption="$VCAP" "$API/sendVideo" >/dev/null
 fi
 
 # Tidy old snapshots; print the caption for the calling agent/CLI.

@@ -4,6 +4,40 @@ All notable changes to Ojo de Gato are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] — 2026-08-09
+
+Fixes "last movement" clips that showed an empty room even when the detector had
+correctly caught a real subject. This was not a false positive: v0.1.1's `deflicker`
+prefilter buffers 5 frames before it can emit one, so motion-frame timestamps trail
+real wall-clock time by ~6s, while the recordings (a straight `-c copy`) do not. The
+clip's 3-second lead-in was smaller than that lag, so every clip opened after the
+subject had already left. Verified against footage of a person crossing the frame:
+the old window was flat empty, the new one puts them dead centre.
+
+### Added
+- `OJOGATO_DETECT_LAG` (default 6): seconds the detector's frame timestamps trail
+  wall clock. `clip.sh` subtracts it before cutting.
+- `OJOGATO_DARK_YAVG` (default 16): mean-luma line below which the scene counts as
+  unlit. With no IR, a dark frame is mostly sensor grain — counts inflate and clips
+  show nothing — so reports now say so instead of implying we saw something.
+- `frames/lastmove.meta`: the clip's lag-corrected event time and mean luma, written
+  by `clip.sh` and read by `report.sh`.
+- docs/motion-tuning.md: detector-lag section with a re-measurement recipe, and a
+  darkness section recording that denoising does *not* fix dark-frame grain
+  (`hqdn3d` at three strengths moved the kept-frame count 7 → 7 → 7).
+
+### Changed
+- Clip window widened to 4s lead-in + 6s tail (12–20s total, was 9–15s) so a few
+  seconds of lag error still leaves the subject inside the clip.
+- `report.sh` captions the clip with the lag-corrected event time from
+  `lastmove.meta` rather than the newest motion frame's filename, which named a
+  moment several seconds after the subject had already left.
+
+### Fixed
+- Clips whose window straddled a 10-minute segment boundary were silently truncated
+  to whatever remained of the first segment (a 12s window came back 4s long).
+  `clip.sh` now cuts across every overlapping segment via the concat demuxer.
+
 ## [0.1.1] — 2026-08-09
 
 Fixes the second phantom-motion class: auto-exposure steps. The detector was firing

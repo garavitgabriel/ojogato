@@ -100,6 +100,39 @@ Walk through the frame at normal speed, once. Within a minute or two the count s
 
 Zero on static, positive on a walk: that's the entire contract. When both hold, "23 motion moments in the last 6h" means something.
 
+## Detector lag: why a correct detection still clipped an empty room
+
+Detection and recording are two clocks, and they do not agree.
+
+Motion frames are named by `strftime` at the moment ffmpeg **writes the JPEG**, not the moment the camera saw the subject. `deflicker=size=N` cannot emit a frame until it has N frames to average — at `OJOGATO_MOTION_FPS=1` that alone is ~5 seconds — and RTSP plus decode buffering adds about a second more. The recordings have no such delay: the recorder is a straight `-c copy` of the same stream.
+
+Measured on the reference install: a person crossing at **21:22:44–46** in the recordings produced motion frames stamped **21:22:49–51**. A steady **~6 second** lag.
+
+The original clip window took a 3-second lead-in before the burst — *smaller than the lag* — so every clip opened after the subject had already walked out. The detector was right and the clip was late, but the symptom looked identical to a false positive: the camera claims movement, the video shows an empty room.
+
+`clip.sh` now subtracts `OJOGATO_DETECT_LAG` (default 6) before cutting, and widens the window to 4s of lead-in and 6s of tail so a few seconds of lag error still leaves the subject inside.
+
+**Re-measure the lag whenever you change `OJOGATO_MOTION_FPS` or the prefilter** — the deflicker window is the dominant term, so halving the fps roughly doubles the lag:
+
+```bash
+# 1. Pick a motion frame you can actually see a subject in; note its filename timestamp.
+# 2. Step through the segment covering that time, one second at a time.
+#    Bigger JPEG = more detail in frame = subject present.
+ffmpeg -v error -ss <offset> -i recordings/<segment>.mp4 -t 20 -vf fps=1 -q:v 5 /tmp/s-%03d.jpg
+ls -l /tmp/s-*.jpg
+# 3. lag = (motion-frame timestamp) - (wall-clock time of the frames showing the subject)
+```
+
+A related trap the wider window exposed: a clip whose window straddles a segment boundary must be cut across **both** files. Cutting from only the segment holding the window's start silently truncates the clip to whatever little of that file remained. `clip.sh` feeds every overlapping segment through the concat demuxer.
+
+## Darkness: the regime where the numbers stop meaning anything
+
+There is no IR illumination. Once the lights go out the sensor runs at maximum gain and the frame is essentially black — mean luma around **8/255**, against roughly **43** for the same room lit. At that gain the picture is mostly grain, and grain is exactly what `mpdecimate` is built to notice, so counts drift up while the footage shows nothing a human could identify.
+
+Denoising does not rescue this. Replay-testing `hqdn3d` at several strengths over a known-empty dark window changed the kept-frame count by zero (7 → 7 → 7); only raising thresholds moved it, and that costs real sensitivity to a small dark cat. No tuning makes a black frame informative.
+
+So the system stops pretending instead. `OJOGATO_DARK_YAVG` (default 16, comfortably between 8 and 43) is the line: below it, reports say the lights are off, the counts are unreliable, and the clip shows nothing — rather than presenting a dark-inflated number as if it were cats. **The real fix is a lamp on a timer**, not a filter chain.
+
 ## Environment notes
 
 - **Sunlight is motion.** A patch of sun crawling across the floor produces real, honest pixel change over minutes. Expect low, slow counts from it; masking zones are on the [roadmap](roadmap.md).

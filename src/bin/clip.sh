@@ -11,6 +11,14 @@
 # clip cut there shows an empty room. A real event (cat/person crossing) produces a
 # dense CLUSTER of motion frames; we clip the last cluster, not the last frame.
 # Cutting works on the segment still being written because record.sh writes fragmented mp4.
+#
+# Detector-lag: motion frames are stamped when the JPEG is WRITTEN, which trails the
+# moment the camera saw the subject. deflicker=size=N buffers N frames before it can
+# emit one (at MOTION_FPS=1 that alone is ~5s), plus RTSP/decode buffering. Measured
+# ~6s on the reference install: a person crossing at 21:22:44-46 produced frames stamped
+# 21:22:49-51. The old 3s lead-in was SMALLER than the lag, so every clip started after
+# the subject had already left — an empty room from a correct detection. We subtract
+# OJOGATO_DETECT_LAG before cutting and widen the window to absorb lag jitter.
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 source "$OJOGATO_HOME/config.env"
 
@@ -45,25 +53,60 @@ for t in $TIMES; do
 done
 if [ -z "$B_START" ]; then B_START=$C_START; B_END=$C_END; fi
 
-# Clip window: 3s of lead-in before the burst, then the burst plus 3s, capped at 15s.
-T0=$(( B_START - 3 ))
-DUR=$(( B_END - B_START + 6 ))
-[ "$DUR" -lt 9 ] && DUR=9
-[ "$DUR" -gt 15 ] && DUR=15
+# Shift the burst back by the detector's pipeline lag to get real wall-clock time,
+# then take LEAD seconds before it and TAIL after. LEAD/TAIL are deliberately wider
+# than the burst itself so a few seconds of lag error still leaves the subject inside.
+LAG="${OJOGATO_DETECT_LAG:-6}"
+LEAD=4; TAIL=6
+E_START=$(( B_START - LAG ))
+E_END=$(( B_END - LAG ))
+T0=$(( E_START - LEAD ))
+DUR=$(( E_END - E_START + LEAD + TAIL ))
+[ "$DUR" -lt 12 ] && DUR=12
+[ "$DUR" -gt 20 ] && DUR=20
 
-# Find the 10-min segment whose window contains the anchor (segment names are start timestamps).
-best=""; bestoff=""
+mkdir -p "$OJOGATO_HOME/frames"
+OUT="$OJOGATO_HOME/frames/lastmove.mp4"
+META="$OJOGATO_HOME/frames/lastmove.meta"
+LIST="$OJOGATO_HOME/frames/lastmove.concat"
+rm -f "$OUT" "$META" "$LIST"
+
+# Collect EVERY 10-min segment the window touches, not just the one holding its start
+# (segment names are start timestamps). An event near a segment boundary spans two files;
+# cutting from only the first silently truncates the clip to however little of that file
+# remained — which is how a 12s window came back 4s long. Feed the overlapping segments
+# through the concat demuxer so the window is contiguous regardless of where it falls.
+T_END=$(( T0 + DUR ))
+first_st=""
 for f in "$REC"/*.mp4; do
   [ -e "$f" ] || continue
   b=$(basename "$f" .mp4)
   st=$(date -j -f "%Y%m%d-%H%M%S" "$b" +%s 2>/dev/null) || continue
-  off=$(( T0 - st ))
-  if [ "$off" -ge 0 ] && [ "$off" -lt 600 ]; then best="$f"; bestoff=$off; fi
+  # Nominal 600s span; overlap test tolerates the ~1s/segment writer drift.
+  [ "$st" -lt "$T_END" ] && [ $(( st + 600 )) -gt "$T0" ] || continue
+  [ -z "$first_st" ] && first_st=$st
+  printf "file '%s'\n" "$f" >> "$LIST"
 done
-[ -z "$best" ] && exit 0
+[ -s "$LIST" ] || exit 0
 
-mkdir -p "$OJOGATO_HOME/frames"
-OUT="$OJOGATO_HOME/frames/lastmove.mp4"
-rm -f "$OUT"
-"$FFMPEG" -y -loglevel error -ss "$bestoff" -i "$best" -t "$DUR" -c copy -movflags +faststart "$OUT" 2>/dev/null
-[ -s "$OUT" ] && echo "$OUT"
+# Offset within the first included segment; clamp if the window opens before it exists.
+OFF=$(( T0 - first_st ))
+[ "$OFF" -lt 0 ] && OFF=0
+"$FFMPEG" -y -loglevel error -f concat -safe 0 -i "$LIST" -ss "$OFF" -t "$DUR" \
+  -c copy -movflags +faststart "$OUT" 2>/dev/null
+rm -f "$LIST"
+[ -s "$OUT" ] || exit 0
+
+# Mean luma of the clip. With no IR the room is near-black once the lights go out
+# (~8/255 measured, vs ~43 lit), and a "here is the movement" video of a black frame
+# reads as a broken camera. report.sh uses this to caption honestly instead of implying
+# we saw something. Never gates the clip itself — the footage is still the evidence.
+YAVG=$("$FFMPEG" -v info -i "$OUT" -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-" \
+  -f null - 2>/dev/null | grep -o 'YAVG=[0-9.]*' | cut -d= -f2 | sort -n | tail -1)
+{
+  echo "CLIP_EVENT_EPOCH=$E_START"
+  echo "CLIP_EVENT_HHMM=$(date -r "$E_START" '+%H:%M')"
+  echo "CLIP_YAVG=${YAVG:-0}"
+} > "$META"
+
+echo "$OUT"
