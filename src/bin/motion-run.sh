@@ -33,7 +33,11 @@ FFMPEG="$OJOGATO_HOME/bin/ffmpeg"
 ALIVE_SEC="${OJOGATO_DETECTOR_ALIVE_SEC:-30}"
 
 mkdir -p "$OJOGATO_HOME/motionframes" "$OJOGATO_HOME/frames"
-exec "$FFMPEG" -hide_banner -loglevel error \
+# -y and -nostdin are both load-bearing under launchd. detector-alive.jpg survives across
+# restarts, so without -y ffmpeg asks "Overwrite? [y/N]" on every start after the first and
+# exits — which takes the whole detector down while a first-run test passes cleanly. -nostdin
+# makes sure no future prompt can ever block a daemon that has no terminal to answer from.
+exec "$FFMPEG" -hide_banner -loglevel error -nostdin -y \
   -use_wallclock_as_timestamps 1 \
   -rtsp_transport tcp -i rtsp://127.0.0.1:8554/cam -an \
   -vf "fps=${OJOGATO_MOTION_FPS:-1},${OJOGATO_MOTION_PREFILTER:-deflicker=size=5:mode=am},mpdecimate=hi=64*${OJOGATO_MOTION_HI:-48}:lo=64*${OJOGATO_MOTION_LO:-24}:frac=${OJOGATO_MOTION_FRAC:-0.6}" \
