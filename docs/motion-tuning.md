@@ -189,6 +189,8 @@ The gap between `DARK` and `LIT` is hysteresis, and it is not decoration: a sing
 
 Set `OJOGATO_PROFILE_MODE="off"` to go back to a single profile driven only by `OJOGATO_MOTION_*`.
 
+One expected artifact: `mpdecimate` always keeps the first frame it sees, so every detector restart — a profile switch, a watchdog kick — writes one motion frame regardless of what the room is doing. Burst clustering already discards it: an isolated frame never anchors a clip or refreshes "last activity", and launchd's 10-second throttle keeps two restarts further apart than `OJOGATO_BURST_GAP`. Expect the odd stray file in `motionframes/` after a switch; expect it never to reach a report.
+
 ## Darkness: the regime where the numbers stop meaning anything
 
 There is no IR illumination. Once the lights go out the sensor runs at maximum gain and the frame is essentially black — mean luma around **8/255**, against roughly **43** for the same room lit. At that gain the picture is mostly grain, and grain is exactly what `mpdecimate` is built to notice, so counts drift up while the footage shows nothing a human could identify.
