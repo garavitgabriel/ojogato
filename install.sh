@@ -1,9 +1,10 @@
 #!/bin/bash
 # Ojo de Gato installer — macOS v1.
-# Usage: ./install.sh [--dry-run] [--link] [--yes]
+# Usage: ./install.sh [--dry-run] [--link] [--yes] [--rebuild-app]
 #   --dry-run   print every action without doing anything
 #   --link      dev mode: symlink src/bin scripts into ~/.ojogato/bin instead of copying
 #   --yes       assume yes on prompts (non-destructive defaults)
+#   --rebuild-app  force an OjoGato.app rebuild (may cost the camera permission)
 #
 # Idempotent: re-running upgrades scripts, templates, and binaries without
 # clobbering ~/.ojogato/config.env or your recordings.
@@ -14,17 +15,19 @@ REPO_DIR=$(cd "$(dirname "$0")" && pwd)
 OJOGATO_HOME="$HOME/.ojogato"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 U=$(id -u)
-SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup com.ojogato.heartbeat"
+SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat"
 
 DRY_RUN=false
 LINK_MODE=false
 ASSUME_YES=false
+FORCE_APP_REBUILD=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=true ;;
     --link)    LINK_MODE=true ;;
     --yes|-y)  ASSUME_YES=true ;;
+    --rebuild-app) FORCE_APP_REBUILD=true ;;
     -h|--help)
       sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -108,7 +111,7 @@ fi
 
 # ---------------------------------------------------------------- layout
 step "Creating ~/.ojogato layout"
-for d in bin recordings motionframes frames logs; do
+for d in bin recordings motionframes frames logs vision; do
   run mkdir -p "$OJOGATO_HOME/$d"
 done
 
@@ -216,6 +219,37 @@ for f in "$REPO_DIR"/src/bin/*; do
 done
 [ -f "$REPO_DIR/src/bin/ojogato" ] || warn "src/bin/ojogato missing from repo — CLI not installed"
 
+# ---------------------------------------------------------------- vision verifier
+# Compiled, not shipped as a binary: it links against the OS Vision framework, so the
+# build has to happen against whatever macOS SDK this machine has. swiftc comes with the
+# Command Line Tools, which are already required for the app bundle below.
+#
+# A failure here is a WARNING, never fatal. The rest of the stack — stream, recording,
+# detection, alerts — works without it; only subject verification is lost, and every
+# consumer already degrades to raw frames while saying VISION=off.
+step "Building ojogato-vision (on-device subject recognition)"
+VISION_SRC="$REPO_DIR/src/vision/ojogato-vision.swift"
+VISION_DEST="$OJOGATO_HOME/bin/ojogato-vision"
+if [ ! -f "$VISION_SRC" ]; then
+  warn "src/vision/ojogato-vision.swift not found — subject verification will stay off"
+elif ! command -v swiftc >/dev/null 2>&1; then
+  warn "swiftc not found (install Xcode Command Line Tools) — subject verification will stay off"
+elif $DRY_RUN; then
+  info "[dry-run] swiftc -O $VISION_SRC -o $VISION_DEST"
+else
+  rm -f "$VISION_DEST"   # may be a stale --link symlink from src/bin
+  if swiftc -O "$VISION_SRC" -o "$VISION_DEST" 2>"$OJOGATO_HOME/logs/vision-build.log"; then
+    chmod +x "$VISION_DEST"
+    if "$VISION_DEST" --help >/dev/null 2>&1; then
+      info "built ojogato-vision"
+    else
+      warn "ojogato-vision built but does not run — see logs/vision-build.log"
+    fi
+  else
+    warn "ojogato-vision build failed — see $OJOGATO_HOME/logs/vision-build.log"
+  fi
+fi
+
 # ---------------------------------------------------------------- app bundle
 step "Building OjoGato.app (camera permission identity)"
 APP="$OJOGATO_HOME/OjoGato.app"
@@ -225,17 +259,40 @@ INFO_TMPL="$REPO_DIR/src/templates/Info.plist"
 if [ ! -f "$INFO_TMPL" ]; then
   warn "src/templates/Info.plist not found — skipping app-bundle build (re-run install once it exists)."
 else
+  # Rebuilding this bundle costs the camera. macOS binds the TCC camera grant to the
+  # bundle's ad-hoc code identity, so a rebuild can invalidate it — and re-granting needs
+  # a human in System Settings, which on a headless watcher means the camera is simply
+  # dead until someone walks over to it. So the up-to-date test has to be exact.
+  #
+  # It was not. It compared "$FFMPEG_DEST" (unsigned, 80,729,336 bytes) against "$APP_BIN"
+  # (the same file after codesign embedded a signature, 81,378,336 bytes). Those can never
+  # be equal, so NEED_BUILD was true on EVERY run and every `ojogato update` silently
+  # rebuilt and re-signed the bundle. That is what took the camera down on 2026-08-15.
+  #
+  # Now we stamp the bundle with hashes of what it was built FROM and compare those.
+  RENDERED=$(sed -e "s|@OJOGATO_HOME@|$OJOGATO_HOME|g" -e "s|@USER_HOME@|$HOME|g" "$INFO_TMPL")
+  STAMP="$APP/Contents/.ojogato-build-stamp"
+  WANT="$(shasum -a 256 "$FFMPEG_DEST" 2>/dev/null | awk '{print $1}') $(printf '%s' "$RENDERED" | shasum -a 256 | awk '{print $1}')"
+
   NEED_BUILD=false
   if [ ! -x "$APP_BIN" ]; then
     NEED_BUILD=true
-  elif ! cmp -s "$FFMPEG_DEST" "$APP_BIN"; then
+  elif [ "$RENDERED" != "$(cat "$APP/Contents/Info.plist" 2>/dev/null)" ]; then
     NEED_BUILD=true
-  else
-    RENDERED=$(sed -e "s|@OJOGATO_HOME@|$OJOGATO_HOME|g" -e "s|@USER_HOME@|$HOME|g" "$INFO_TMPL")
-    if [ "$RENDERED" != "$(cat "$APP/Contents/Info.plist" 2>/dev/null)" ]; then
-      NEED_BUILD=true
+  elif [ ! -f "$STAMP" ]; then
+    # Bundle predates stamping. Adopt it instead of rebuilding: it already works and
+    # already holds the camera grant, and rebuilding to satisfy our own bookkeeping is
+    # exactly the mistake above. Use --rebuild-app to force one.
+    if $DRY_RUN; then
+      info "[dry-run] adopt existing bundle → write $STAMP"
+    else
+      printf '%s\n' "$WANT" > "$STAMP"
     fi
+    info "adopted existing OjoGato.app (stamped; camera grant preserved)"
+  elif [ "$WANT" != "$(cat "$STAMP" 2>/dev/null)" ]; then
+    NEED_BUILD=true
   fi
+  $FORCE_APP_REBUILD && NEED_BUILD=true
 
   if ! $NEED_BUILD; then
     info "OjoGato.app already up to date — leaving it alone (preserves the camera grant)"
@@ -246,13 +303,19 @@ else
       info "[dry-run] cp ffmpeg → $APP_BIN"
       info "[dry-run] codesign --force --deep --sign - $APP"
     else
+      # Written by sed, not by echoing $RENDERED: command substitution eats the trailing
+      # newline, and a bundle whose Info.plist differs from a previous install's by one
+      # byte is a bundle that gets needlessly rebuilt — the very thing above.
       sed -e "s|@OJOGATO_HOME@|$OJOGATO_HOME|g" -e "s|@USER_HOME@|$HOME|g" "$INFO_TMPL" > "$APP/Contents/Info.plist"
       rm -f "$APP_BIN"
       cp -f "$FFMPEG_DEST" "$APP_BIN"
       chmod +x "$APP_BIN"
       codesign --force --deep --sign - "$APP" 2>/dev/null || die "codesign failed — is Xcode CLT installed? (xcode-select --install)"
+      printf '%s\n' "$WANT" > "$STAMP"
       info "built + ad-hoc signed $APP"
-      warn "if this replaced an existing bundle, macOS may re-ask for camera permission (ojogato setup walks you through it)"
+      warn "this replaced the bundle — macOS may have dropped the camera grant. If the stream"
+      warn "does not come back, re-approve Camera for OjoGato.app in System Settings →"
+      warn "Privacy & Security → Camera, then run: ojogato off && ojogato on"
     fi
   fi
 fi
@@ -307,7 +370,7 @@ for t in "$REPO_DIR"/src/templates/com.ojogato.*.plist.tmpl; do
   render "$t" "$LAUNCH_AGENTS/$(basename "$t" .tmpl)"
   PLIST_COUNT=$((PLIST_COUNT + 1))
 done
-[ "$PLIST_COUNT" -eq 6 ] || warn "expected 6 launchd plist templates, found $PLIST_COUNT"
+[ "$PLIST_COUNT" -eq 7 ] || warn "expected 7 launchd plist templates, found $PLIST_COUNT"
 
 if [ -f "$REPO_DIR/src/templates/mediamtx.yml.tmpl" ]; then
   render "$REPO_DIR/src/templates/mediamtx.yml.tmpl" "$OJOGATO_HOME/mediamtx.yml"
@@ -379,7 +442,7 @@ boot() { # boot <label>
 for L in $BOOT_LIST; do boot "$L"; done
 if [ ! -f "$OJOGATO_HOME/PAUSED" ]; then
   $DRY_RUN || sleep 2   # let mediamtx open 8554 before the publishers connect
-  for L in com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup com.ojogato.heartbeat; do
+  for L in com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat; do
     boot "$L"
   done
 fi

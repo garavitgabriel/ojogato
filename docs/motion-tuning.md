@@ -68,6 +68,62 @@ Two defenses ship enabled:
 1. **`deflicker` prefilter** (`OJOGATO_MOTION_PREFILTER`) — normalizes global luma across a rolling window *before* mpdecimate compares frames, so only local change survives. This is why `hi` can stay moderate (protecting sensitivity to a small or low-contrast pet) instead of being cranked until real subjects risk being missed.
 2. **Burst clustering** (`OJOGATO_BURST_GAP`, `OJOGATO_BURST_MIN`) — real events produce runs of consecutive-second frames; residual exposure blips land as isolated frames several seconds apart. Both the last-movement clip and the "last activity" stat only count a cluster of ≥ `OJOGATO_BURST_MIN` frames ≤ `OJOGATO_BURST_GAP` seconds apart. An isolated frame is recorded but never anchors evidence. (`LAST_FRAME_MIN` in `motion-stats.sh` output still exposes the raw newest-frame age for debugging the detector itself.)
 
+### Why neither defense was enough, and what replaced them
+
+Both defenses above narrow the problem. Neither removes it, and it is worth being precise
+about why, because the reasoning generalises to any threshold you might be tempted to add.
+
+`deflicker` normalizes **luma**. It does not touch **chroma**, so an auto-white-balance
+shift — the frame swinging warmer or cooler — passes straight through. And mpdecimate's
+`hi` test fires when *a single 8x8 block* exceeds the threshold, so one blown-out doorway
+re-metering is enough to keep a frame no matter how quiet the other 14,399 blocks are.
+
+Burst clustering assumes noise is isolated and real events cluster. Measured on the
+reference camera on 2026-08-15, that assumption is simply false: exposure flicker produces
+qualifying bursts of six to twelve frames spanning a minute or more. The "last movement"
+clip that triggered this work was anchored on such a burst at 13:34 and showed an empty
+corridor — a correct application of the rule to a signal the rule cannot classify.
+
+The numbers for that day, with the room hand-checked frame by frame:
+
+| Measure | Value |
+|---|---|
+| Candidate frames written | 1,655 |
+| Runs of them containing a cat, dog or person | 24 |
+| What the 6h report said | "243 motion moments" |
+| Room had actually been empty since | 10:38 |
+| Consecutive empty "motion" frames, 13:37–14:03 | 36 |
+
+No threshold fixes this, because the pixel change is real and large. The only thing that
+separates "the camera re-metered" from "a cat walked in" is **what is in the frame**. So the
+detector was left exactly as sensitive as it was — it is a cheap proposer, and a proposer is
+allowed to be wrong — and a recognition pass was put between it and everything a human
+reads. See [`events.sh`](../src/bin/events.sh) for the event model and
+[`ojogato-vision.swift`](../src/vision/ojogato-vision.swift) for the classifier.
+
+Two findings from building it, both counter-intuitive enough to record:
+
+**Lowering the confidence floor recovers nothing.** For a subject far down the corridor,
+Vision returns *no observation at all*, not a low-confidence one — sweeping `--min` from
+0.30 down to 0.10 changed not one verdict on a set of known misses. Vision downsamples its
+input, so a distant cat is a few dozen pixels by the time the recogniser sees it. What
+recovers those frames is **tiling**: running the same recogniser over overlapping, upscaled
+crops. Full-frame found 199 animal frames that day; 3x2 tiled found 349, at the same floor,
+with no new false positives.
+
+**Classify events, not frames.** Frame-level recognition has real misses — an animal with
+its back turned, pale fur against a pale floor, a person cropped to a forearm at the top of
+the frame. Requiring every frame to be recognised would hide genuine activity. But a subject
+that is really in the room stays for seconds and lands in a whole run of frames, and the
+recogniser only has to succeed on **one** of them; exposure flicker produces runs where it
+succeeds on none. That asymmetry is what makes the system both sensitive and quiet. Over 24h
+it yielded 43 real events, each with a plausible duration and a confident best frame, and
+zero false positives in the hand-checked empty window.
+
+Tuning knobs: `OJOGATO_VISION_MIN_CONFIDENCE`, `OJOGATO_VISION_TILES`, `OJOGATO_EVENT_GAP`.
+`OJOGATO_VISION_ENABLED=0` turns the whole layer off and reverts every report to raw frame
+counts, labelled `unverified` so nothing silently overclaims.
+
 ## Replay tuning: validate against your own recordings
 
 You don't have to tune live. The rolling recordings are the same stream the detector sees, so candidate settings can be replayed offline against footage of *known* content — a window you've verified is empty, and a window with a real crossing:

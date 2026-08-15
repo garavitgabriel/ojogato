@@ -20,3 +20,19 @@ done
 
 # Motion frames follow the same age retention (tiny jpgs, but unbounded otherwise).
 find "$OJOGATO_HOME/motionframes" -name "*.jpg" -mmin +"$RET_MIN" -delete 2>/dev/null
+
+# Vision verdicts are append-only and keyed by frame basename, so they outlive the frames
+# they describe and would grow forever. Drop rows whose frame is past retention — once the
+# JPEG is gone nothing can re-derive or re-check that verdict anyway. Rewritten through a
+# temp file and mv so a consumer reading the cache mid-prune sees one whole file or the
+# other, never a truncated one.
+VERDICTS="$OJOGATO_HOME/vision/verdicts.tsv"
+if [ -s "$VERDICTS" ]; then
+  CUTOFF=$(( $(date +%s) - RET_MIN * 60 ))
+  TMP="$VERDICTS.tmp.$$"
+  if awk -F'\t' -v c="$CUTOFF" '$1+0 >= c' "$VERDICTS" > "$TMP" 2>/dev/null; then
+    mv -f "$TMP" "$VERDICTS"
+  else
+    rm -f "$TMP"
+  fi
+fi

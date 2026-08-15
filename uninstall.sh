@@ -8,7 +8,7 @@
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 U=$(id -u)
-SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup com.ojogato.heartbeat"
+SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat"
 
 ASSUME_YES=false
 for a in "$@"; do

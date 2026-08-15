@@ -17,9 +17,12 @@ Ojo de Gato ("cat's eye" in Spanish) turns a Mac with a camera into a monitoring
 Everything that matters is plain ffmpeg and shell — it cannot hallucinate:
 
 - Motion detection is continuous frame differencing (ffmpeg `mpdecimate`), not a model guessing.
-- Activity stats are counts of saved motion frames and file timestamps. They are either right or verifiably wrong.
-- The "last movement" evidence is a real ~9 second clip cut from the recording around the actual motion event — never a "best guess" still.
+- Subject recognition is Apple's Vision framework, running **on your machine**: no model download, no network call, no API key, no account. A camera pointed at your kitchen should not need the internet to tell a cat from a light change.
+- Activity stats are counts of verified events with the frames still on disk behind them. They are either right or verifiably wrong — and you can go look.
+- The "last movement" evidence is a real ~9 second clip cut from the recording around the actual event — never a "best guess" still.
 - The watchdog is launchd plus `curl`. It fires whether or not any agent is alive.
+
+**Recognition is a classifier, not a narrator.** It answers one closed question — cat, dog, person, or nothing — with a confidence number you can audit, and it can be switched off (`OJOGATO_VISION_ENABLED=0`), after which reports fall back to raw frame counts and say so. It never describes a scene, and no generative model is anywhere near the pipeline.
 
 The LLM only adds voice. When OpenClaw is connected, the agent runs the same deterministic report script and relays its output conversationally — it never invents what it "sees". If you skip OpenClaw entirely, the same reports arrive as plain Telegram messages. The LLM is optional garnish; the pipeline is the meal.
 
@@ -58,13 +61,21 @@ Then message your bot — or, with OpenClaw, run `openclaw/register.sh` and just
   view   record.sh  motion-run.sh
   WebRTC 10-min     continuous ffmpeg
   :8889  fragmented mpdecimate ->
-  HLS    mp4        timestamped
-  :8888  segments   motion frames
+  HLS    mp4        CANDIDATE frames
+  :8888  segments   (pixels changed)
  (tailnet   |           |
-   only)    +-----+-----+
+   only)    |           v
+            |    vision-run.sh      Apple Vision, on-device
+            |    ojogato-vision     cat / dog / person?
+            |           |
+            |           v
+            |      events.sh        candidates -> EVENTS;
+            |                       real iff a subject was
+            |           |           seen in >=1 frame
+            +-----+-----+
                   |
                   v
-         report.sh / clip.sh     snapshot + stats + ~9s clip
+         report.sh / clip.sh     snapshot + sightings + ~9s clip
                   |
                   v
               Telegram
@@ -81,7 +92,9 @@ Recordings use **fragmented mp4**, which is what lets `clip.sh` cut a clip out o
 - **No night vision** on built-in Mac cameras. Leave a light on, or use a USB camera with IR.
 - **The lid must stay open** to use a MacBook's built-in camera. Closing the lid kills the feed.
 - **macOS-only in v1.** Linux/VPS support is on the [roadmap](docs/roadmap.md).
-- Motion detection sees pixel change, not meaning. It counts "something moved", not "a cat moved" — see [motion tuning](docs/motion-tuning.md) for keeping that count honest.
+- **The detector sees pixel change, not meaning**, and on a webcam with active auto-exposure an empty room produces thousands of changes a day. That is why a recognition pass sits between the detector and anything you read: see [motion tuning](docs/motion-tuning.md).
+- **Recognition is good, not perfect.** It misses individual frames — an animal with its back turned, pale fur on a pale floor, a person cropped to a forearm — which is exactly why an *event* counts as real if a subject is recognised in any one of its frames. A subject that crosses the frame in under a second, in the dark, can still be missed entirely.
+- **Cat vs dog is not reliable** at this resolution, so both are reported as one "pet" class named from `OJOGATO_SUBJECT`.
 
 ## Docs
 

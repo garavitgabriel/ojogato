@@ -1,69 +1,101 @@
 #!/bin/bash
-# Cuts a short clip around the last real BURST of motion from the rolling recordings;
-# prints the clip path (or nothing). Called by report.sh (and `ojogato clip`).
+# Cuts a short clip around the last VERIFIED movement from the rolling recordings; prints
+# the clip path (or nothing). Called by report.sh (and `ojogato clip`).
 #
 # Clip-not-still: the last-movement evidence is always a clip, never a "best still"
-# (still-selection proved unreliable: mpdecimate also saves the empty "aftermath"
-# frame after the subject leaves).
+# (still-selection proved unreliable: mpdecimate also saves the empty "aftermath" frame
+# after the subject leaves).
 #
-# Burst-not-newest: anchoring on the single newest motion frame proved unreliable too —
-# the newest frame is often a tail-end blip (subject leaving, exposure settling), so a
-# clip cut there shows an empty room. A real event (cat/person crossing) produces a
-# dense CLUSTER of motion frames; we clip the last cluster, not the last frame.
-# Cutting works on the segment still being written because record.sh writes fragmented mp4.
+# Subject-not-burst. This used to anchor on the last dense CLUSTER of motion frames, on
+# the theory that real events cluster and false positives arrive as isolated blips. That
+# theory was wrong, and the failure was the reason for this rewrite: on 2026-08-15 the
+# clip sent to the phone was captioned "Last movement — 13:34" and showed an empty room,
+# because auto-exposure flicker had produced a perfectly good qualifying burst at 13:34
+# and the room had in fact been empty since 10:38. No clustering rule can fix that,
+# because clustering measures the shape of the noise, not whether anyone was there.
+# So the anchor is now an event that ojogato-vision confirmed contains a cat, dog or
+# person, and the window is placed over the frames where the subject was actually seen.
 #
 # Detector-lag: motion frames are stamped when the JPEG is WRITTEN, which trails the
-# moment the camera saw the subject. deflicker=size=N buffers N frames before it can
-# emit one (at MOTION_FPS=1 that alone is ~5s), plus RTSP/decode buffering. Measured
-# ~6s on the reference install: a person crossing at 21:22:44-46 produced frames stamped
-# 21:22:49-51. The old 3s lead-in was SMALLER than the lag, so every clip started after
-# the subject had already left — an empty room from a correct detection. We subtract
-# OJOGATO_DETECT_LAG before cutting and widen the window to absorb lag jitter.
+# moment the camera saw the subject. deflicker=size=N buffers N frames before it can emit
+# one (at MOTION_FPS=1 that alone is ~5s), plus RTSP/decode buffering. Measured ~6s on the
+# reference install: a person crossing at 21:22:44-46 produced frames stamped 21:22:49-51.
+# The old 3s lead-in was SMALLER than the lag, so every clip started after the subject had
+# already left — an empty room from a correct detection. We subtract OJOGATO_DETECT_LAG
+# before cutting and widen the window to absorb lag jitter.
+#
+# Cutting works on the segment still being written because record.sh writes fragmented mp4.
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 source "$OJOGATO_HOME/config.env"
 
+BIN="$OJOGATO_HOME/bin"
 FFMPEG="$OJOGATO_HOME/bin/ffmpeg"
 [ -x "$FFMPEG" ] || FFMPEG="$(command -v ffmpeg)"
 
 REC="$OJOGATO_HOME/recordings"
+LOOKBACK="${OJOGATO_CLIP_LOOKBACK_HOURS:-24}"
 
-# Collect motion-frame mtimes, oldest -> newest (bounded to the last 200 frames).
-TIMES=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -200 | while read -r f; do
-  stat -f %m "$f"
-done | sort -n)
-[ -z "$TIMES" ] && exit 0
-
-# Find the last burst: frames <= OJOGATO_BURST_GAP seconds apart belong to one event.
-# Prefer the most recent burst with >= OJOGATO_BURST_MIN frames (real movement);
-# fall back to the newest single frame.
-# Gap default is 4s (was 10s): real events produce consecutive-second frames, while
-# residual auto-exposure false positives land as isolated frames 5-10s apart — a 10s
-# gap let two of those pair up into a fake "burst" and clip an empty room.
-GAP="${OJOGATO_BURST_GAP:-4}"
-BMIN="${OJOGATO_BURST_MIN:-2}"
-B_START=""; B_END=""; C_START=""; C_END=""; C_N=0; PREV=0
-for t in $TIMES; do
-  if [ "$PREV" -ne 0 ] && [ $(( t - PREV )) -le "$GAP" ]; then
-    C_END=$t; C_N=$(( C_N + 1 ))
-  else
-    C_START=$t; C_END=$t; C_N=1
+# ---------------------------------------------------------------- pick the anchor
+# VERDICT is what report.sh captions the clip with: pet, person, or unverified.
+VERDICT=""; SCORE=""; S_FIRST=""; S_LAST=""; BEST=""
+if [ "${OJOGATO_VISION_ENABLED:-1}" != "0" ] && [ -x "$BIN/events.sh" ]; then
+  EV=$("$BIN/events.sh" --hours "$LOOKBACK" --last-real 2>/dev/null)
+  if [ -n "$EV" ]; then
+    VERDICT=$(printf '%s' "$EV" | cut -f5)
+    SCORE=$(printf '%s'   "$EV" | cut -f6)
+    BEST=$(printf '%s'    "$EV" | cut -f7)
+    S_FIRST=$(printf '%s' "$EV" | cut -f9)
+    S_LAST=$(printf '%s'  "$EV" | cut -f10)
   fi
-  if [ "$C_N" -ge "$BMIN" ]; then B_START=$C_START; B_END=$C_END; fi
-  PREV=$t
-done
-if [ -z "$B_START" ]; then B_START=$C_START; B_END=$C_END; fi
+fi
 
-# Shift the burst back by the detector's pipeline lag to get real wall-clock time,
-# then take LEAD seconds before it and TAIL after. LEAD/TAIL are deliberately wider
-# than the burst itself so a few seconds of lag error still leaves the subject inside.
+if [ -z "$S_FIRST" ] || [ "$S_FIRST" = "0" ]; then
+  # No verified event (verifier off, still catching up, or genuinely nothing seen in
+  # LOOKBACK hours). Fall back to the old burst anchor so `ojogato clip` still produces
+  # something, and mark it unverified so the caption cannot overclaim.
+  VERDICT="unverified"; SCORE="0"
+  TIMES=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -200 | while read -r f; do
+    stat -f %m "$f"
+  done | sort -n)
+  [ -z "$TIMES" ] && exit 0
+  GAP="${OJOGATO_BURST_GAP:-4}"
+  BMIN="${OJOGATO_BURST_MIN:-2}"
+  B_START=""; B_END=""; C_START=""; C_END=""; C_N=0; PREV=0
+  for t in $TIMES; do
+    if [ "$PREV" -ne 0 ] && [ $(( t - PREV )) -le "$GAP" ]; then
+      C_END=$t; C_N=$(( C_N + 1 ))
+    else
+      C_START=$t; C_END=$t; C_N=1
+    fi
+    if [ "$C_N" -ge "$BMIN" ]; then B_START=$C_START; B_END=$C_END; fi
+    PREV=$t
+  done
+  if [ -z "$B_START" ]; then B_START=$C_START; B_END=$C_END; fi
+  S_FIRST=$B_START; S_LAST=$B_END; BEST=$B_START
+fi
+
+# ---------------------------------------------------------------- place the window
+# Shift back by the detector's pipeline lag to get real wall-clock time, then take LEAD
+# seconds before the first sighting and TAIL after the last. LEAD/TAIL are deliberately
+# wider than the sighting span so a few seconds of lag error still leaves the subject
+# inside the frame.
 LAG="${OJOGATO_DETECT_LAG:-6}"
 LEAD=4; TAIL=6
-E_START=$(( B_START - LAG ))
-E_END=$(( B_END - LAG ))
+MAXDUR=20
+E_START=$(( S_FIRST - LAG ))
+E_END=$(( S_LAST - LAG ))
+
 T0=$(( E_START - LEAD ))
 DUR=$(( E_END - E_START + LEAD + TAIL ))
+if [ "$DUR" -gt "$MAXDUR" ]; then
+  # A long sighting (a cat settling in at the bowls for five minutes) can't be shown
+  # whole, so centre the window on the frame where the recogniser was most confident —
+  # by construction the moment the subject was most clearly visible.
+  [ -n "$BEST" ] && [ "$BEST" != "0" ] || BEST=$S_FIRST
+  T0=$(( BEST - LAG - 5 ))
+  DUR=16
+fi
 [ "$DUR" -lt 12 ] && DUR=12
-[ "$DUR" -gt 20 ] && DUR=20
 
 mkdir -p "$OJOGATO_HOME/frames"
 OUT="$OJOGATO_HOME/frames/lastmove.mp4"
@@ -107,6 +139,8 @@ YAVG=$("$FFMPEG" -v info -i "$OUT" -vf "signalstats,metadata=print:key=lavfi.sig
   echo "CLIP_EVENT_EPOCH=$E_START"
   echo "CLIP_EVENT_HHMM=$(date -r "$E_START" '+%H:%M')"
   echo "CLIP_YAVG=${YAVG:-0}"
+  echo "CLIP_VERDICT=${VERDICT:-unverified}"
+  echo "CLIP_SCORE=${SCORE:-0}"
 } > "$META"
 
 echo "$OUT"

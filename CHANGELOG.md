@@ -4,6 +4,81 @@ All notable changes to Ojo de Gato are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-08-15
+
+Motion reports stop meaning "pixels changed" and start meaning "a subject was there."
+
+Three releases have now tried to make a pixel-difference metric behave like a subject
+detector — `deflicker` in 0.1.1, tighter burst clustering in 0.1.1, lag-corrected clip
+windows in 0.1.2 — and each narrowed the problem without removing it. Measured on the
+reference camera on 2026-08-15: **1,655 motion frames in a day, of which only 24 runs
+contained a cat, dog or person.** The 6-hour report read "243 motion moments" over a room
+that had been empty since 10:38, and the "last movement" clip sent to the phone was
+anchored on an auto-exposure burst at 13:34 and showed an empty corridor. Thirty-six
+consecutive "motion" frames between 13:37 and 14:03 were hand-checked: every one an empty
+room, the only thing changing being the webcam's own exposure and white balance.
+
+No threshold fixes that, because the signal genuinely is a large pixel change. So the
+detector keeps its job — a cheap proposer, 86,400 frames/day down to a few thousand
+candidates — and a new layer decides what actually happened.
+
+### Added
+- **`ojogato-vision`** — on-device subject recognition built on Apple's Vision framework
+  (`VNRecognizeAnimalsRequest` + `VNDetectHumanRectanglesRequest`). No model download, no
+  network, no API key, no Python; compiled by `install.sh` with `swiftc`. Nothing about the
+  camera leaves the machine.
+  - **Tiled inference** (`OJOGATO_VISION_TILES`, default `3x2`) is load-bearing, not an
+    optimisation. Vision downsamples its input, so a cat down the corridor yields *no
+    observation at all* rather than a low-confidence one — which is why lowering the
+    confidence floor recovers nothing and only tiling does. Measured over one day:
+    full-frame 199 animal frames, 3x2 tiled 349, same floor, no new false positives.
+- **`events.sh`** — the single definition of "motion". An EVENT is a run of candidate
+  frames no more than `OJOGATO_EVENT_GAP` (default 30s) apart, and it is REAL only if a
+  subject was recognised in **at least one** of its frames.
+  - Event-level, not frame-level, is the whole design. The recogniser legitimately misses
+    individual frames — a ragdoll with its back turned, pale fur against pale tile, a
+    person cropped to a forearm — but a subject that is really in the room stays for
+    seconds and lands in many frames, while exposure flicker produces runs where it is
+    recognised in none. Validated over 24h: 43 real events, each with a plausible duration
+    and a confident best frame; zero false positives in a hand-checked empty window.
+- **`com.ojogato.vision`** launchd service (`vision-run.sh`): classifies new frames
+  oldest-first into an append-only, idempotent verdict cache, with its own liveness file so
+  a dead verifier can never read as a quiet room.
+- `ojogato status` separates **`last candidate frame`** from **`last sighting`**, and
+  reports verified sightings, noise events and candidate frames side by side.
+- Watchdog check for a capture process that is running but has used no CPU — the camera
+  wedged rather than the software, previously invisible for 30 minutes.
+- `install.sh --rebuild-app` to force an app-bundle rebuild.
+
+### Changed
+- `motion-stats.sh` reports `MOTION_EVENTS_LAST_<N>H` (verified sightings) and
+  `NOISE_EVENTS_LAST_<N>H`. `MOTION_FRAMES_LAST_<N>H` survives as a diagnostic — the gap
+  between it and the event count is the measure of detector noise — but is no longer what a
+  human is shown as "activity". `VISION=on|off|stale` says which regime produced the numbers.
+- `clip.sh` anchors on the last **verified** event and places the window over the frames
+  where the subject was actually seen, centring on the highest-confidence frame when the
+  sighting is too long to show whole. Falls back to the old burst anchor, labelled
+  `unverified`, when the verifier is off or has seen nothing in
+  `OJOGATO_CLIP_LOOKBACK_HOURS`.
+- `report.sh` captions clips with what was recognised — "The cats at 14:20", "Someone came
+  by at 09:14" — instead of "Last movement", which was a promise the system could not keep.
+  An unverified clip says so.
+- `events.sh` resolves frame timestamps one calendar day at a time instead of forking
+  `date` per frame: ~50s → 0.2s, and `report.sh` calls it three times.
+- `cleanup.sh` prunes verdict rows whose frames are past retention.
+
+### Fixed
+- **`install.sh` rebuilt `OjoGato.app` on every run, silently risking the camera
+  permission.** The up-to-date test compared the *unsigned* `ffmpeg` against the *signed*
+  app binary, which can never be equal because `codesign` embeds ~649KB of signature. Every
+  `ojogato update` therefore re-signed the bundle that exists solely to hold the TCC camera
+  grant — and re-granting needs a human in System Settings, which on a headless watcher
+  means the camera is dead until someone walks over to it. The bundle is now stamped with
+  hashes of what it was built from; pre-stamp bundles are adopted rather than rebuilt.
+- `ojogato on` restarted a hardcoded list of services while `ojogato off` stopped
+  `$CAM_SERVICES`; the two drifted the moment a service was added, leaving
+  `com.ojogato.vision` stopped after any pause. `on` now derives its list from `off`'s.
+
 ## [0.1.3] — 2026-08-10
 
 Fixes a silent 12h45m blackout: the detector reported no movement all morning while a

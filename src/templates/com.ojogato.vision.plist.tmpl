@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Vision verifier: decides which candidate motion frames actually contain a cat, dog or
+     person, so counts and clips stop reporting auto-exposure flicker as activity. Separate
+     job from the detector on purpose — if this one dies, capture, recording and the live
+     stream are untouched and reports fall back to raw frames while saying so. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.vision</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@OJOGATO_HOME@/bin/vision-run.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>5</integer>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/vision.err</string>
+</dict>
+</plist>

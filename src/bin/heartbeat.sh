@@ -39,6 +39,37 @@ else
   [ "$AGE" -gt 1800 ] && PROBLEMS+=("newest recording is $((AGE / 60)) min old — capture stalled")
 fi
 
+# 2a) Capture ALIVE but publishing nothing — the camera itself is wedged.
+#
+# This is a distinct failure from "capture is not running", and it is invisible to every
+# other check for half an hour: the process is up, launchd is happy, mediamtx is up, and
+# only the recording-age check above eventually notices, at 30 minutes. Seen 2026-08-15
+# after the installer re-signed OjoGato.app: ffmpeg held the device, burned 0% CPU, and
+# never produced a frame, while `launchctl list` showed a healthy PID.
+#
+# The signature is exact — a capture process consuming no CPU — so no repair is attempted:
+# restarting it does not clear a wedged camera daemon, and saying so is more useful than
+# a restart loop that looks like action. Both remedies below need a human with root.
+if pgrep -f "ojogato-capture" >/dev/null 2>&1 && ! [ -f "$OJOGATO_HOME/PAUSED" ]; then
+  CAP_PID=$(pgrep -f "ojogato-capture" | head -1)
+  # BSD ps has no `etimes`, so both columns come back formatted ([DD-]HH:MM:SS and
+  # MM:SS.ss) and are folded to whole seconds here.
+  set -- $(ps -o etime=,time= -p "$CAP_PID" 2>/dev/null | awk '
+    function tosec(t,   d, n, p, s, i) {
+      d = 0
+      if (t ~ /-/) { split(t, x, "-"); d = x[1] + 0; t = x[2] }
+      n = split(t, p, ":")
+      s = 0
+      for (i = 1; i <= n; i++) s = s * 60 + p[i]
+      return s + d * 86400
+    }
+    { printf "%d %d\n", tosec($1), tosec($2) }')
+  CAP_ELAPSED="$1"; CAP_CPU="$2"
+  if [ -n "$CAP_ELAPSED" ] && [ "$CAP_ELAPSED" -gt 120 ] && [ "${CAP_CPU:-1}" -lt 2 ]; then
+    PROBLEMS+=("camera capture is running but has used no CPU in ${CAP_ELAPSED}s — the camera is wedged, not the software. Fix on the machine: 'sudo killall UVCAssistant' then 'ojogato off && ojogato on'. If that fails, re-approve Camera for OjoGato.app in System Settings → Privacy & Security, or reboot.")
+  fi
+fi
+
 # 2b) Detector wedged? A stalled detector and a quiet room both produce zero motion frames,
 #     so "no frames" cannot distinguish them — that ambiguity hid a 12h45m outage on
 #     2026-08-10, where ffmpeg kept decoding while its filter graph emitted nothing.

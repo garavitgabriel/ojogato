@@ -10,8 +10,8 @@ APP="$OJOGATO_HOME/OjoGato.app"
 APP_BIN="$APP/Contents/MacOS/ojogato-capture"
 U=$(id -u)
 
-ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup com.ojogato.heartbeat"
-CAM_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup"
+ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat"
+CAM_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup"
 
 step() { printf '▸ %s\n' "$*"; }
 die()  { printf 'ojogato: %s\n' "$*" >&2; exit 1; }
@@ -251,7 +251,12 @@ cmd_on() {
   rm -f "$OJOGATO_HOME/PAUSED"
   boot_svc com.ojogato.mediamtx
   sleep 2
-  for L in com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.cleanup; do
+  # Derived from CAM_SERVICES rather than listed again: `off` boots out CAM_SERVICES, and
+  # a second hand-maintained list here drifts from it the moment a service is added. It
+  # did — com.ojogato.vision was stopped by `off` and never came back, leaving the stack
+  # running with no subject verification and reports quietly falling back to raw frames.
+  for L in $CAM_SERVICES; do
+    [ "$L" = "com.ojogato.mediamtx" ] && continue   # already booted above, before the sleep
     boot_svc "$L"
   done
   [ -z "$(svc_pid com.ojogato.heartbeat)" ] && boot_svc com.ojogato.heartbeat
@@ -274,12 +279,39 @@ cmd_status() {
   fi
   DU=$(du -sh "$OJOGATO_HOME/recordings" 2>/dev/null | cut -f1)
   echo "  recordings disk use: ${DU:-0} (cap ${OJOGATO_CAP_GB:-?}GB, retention ${OJOGATO_RETENTION_HOURS:-?}h)"
+  # Two separate lines on purpose. "candidate frames" is what the pixel detector noticed;
+  # "last sighting" is what was actually in the room. They differ by an order of magnitude
+  # on this camera — auto-exposure hunting produces thousands of candidates a day over an
+  # empty room — and collapsing them into one "last motion" line is what made the reports
+  # untrustworthy in the first place.
   M=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -1)
   if [ -n "$M" ]; then
     AGEM=$(( ($(date +%s) - $(stat -f %m "$M")) / 60 ))
-    if [ "$AGEM" -lt 60 ]; then echo "  last motion: ${AGEM} min ago"; else echo "  last motion: $((AGEM/60))h $((AGEM%60))m ago"; fi
+    if [ "$AGEM" -lt 60 ]; then echo "  last candidate frame: ${AGEM} min ago"; else echo "  last candidate frame: $((AGEM/60))h $((AGEM%60))m ago"; fi
   else
-    echo "  last motion: none recorded yet"
+    echo "  last candidate frame: none recorded yet"
+  fi
+  if [ -x "$BIN/motion-stats.sh" ]; then
+    S=$("$BIN/motion-stats.sh" 12 2>/dev/null)
+    VS=$(echo "$S" | grep -oE 'VISION=[a-z]+' | cut -d= -f2)
+    LMM=$(echo "$S" | grep -oE 'LAST_MOTION_MIN=[0-9]+' | cut -d= -f2)
+    ME=$(echo "$S" | grep -oE 'MOTION_EVENTS_LAST_12H=[0-9]+' | cut -d= -f2)
+    NE=$(echo "$S" | grep -oE 'NOISE_EVENTS_LAST_12H=[0-9]+' | cut -d= -f2)
+    MF=$(echo "$S" | grep -oE 'MOTION_FRAMES_LAST_12H=[0-9]+' | cut -d= -f2)
+    case "$VS" in
+      on)
+        if [ "${LMM:-9999}" -ge 9999 ]; then
+          echo "  last sighting: none in 12h"
+        elif [ "$LMM" -lt 60 ]; then
+          echo "  last sighting: ${LMM} min ago"
+        else
+          echo "  last sighting: $((LMM/60))h $((LMM%60))m ago"
+        fi
+        echo "  verified 12h: ${ME:-0} sightings, ${NE:-0} noise events, ${MF:-0} candidate frames"
+        ;;
+      stale) echo "  subject verification: STALLED — counts below are unverified camera noise" ;;
+      *)     echo "  subject verification: off (OJOGATO_VISION_ENABLED=0)" ;;
+    esac
   fi
   # Detector liveness is reported separately from "last motion" on purpose: a quiet room
   # and a wedged pipeline both read as no recent motion, and only this line separates them.
@@ -361,6 +393,31 @@ cmd_doctor() {
       pass "camera permission looks granted (frames/recordings exist; TCC db not readable from here)"
     else
       fail "cannot confirm camera permission and no frames exist — run 'ojogato setup'"
+    fi
+  fi
+
+  # subject verification — the layer that decides whether a candidate frame held a
+  # subject. Checked here because when it is down every report silently reverts to
+  # counting raw pixel change, which is the failure this whole layer exists to end.
+  if [ "${OJOGATO_VISION_ENABLED:-1}" = "0" ]; then
+    pass "subject verification disabled by config (reports will say 'unverified')"
+  elif [ ! -x "$BIN/ojogato-vision" ]; then
+    fail "ojogato-vision not built — re-run install.sh (needs Xcode Command Line Tools for swiftc)"
+  else
+    ALIVE="$OJOGATO_HOME/vision/verifier-alive"
+    AGE=999999
+    [ -s "$ALIVE" ] && AGE=$(( $(date +%s) - $(cat "$ALIVE" 2>/dev/null || echo 0) ))
+    if [ "$AGE" -le "${OJOGATO_VISION_STALL_SEC:-300}" ]; then
+      NV=$(wc -l < "$OJOGATO_HOME/vision/verdicts.tsv" 2>/dev/null | tr -d ' ')
+      NF_=$(ls "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | wc -l | tr -d ' ')
+      BACKLOG=$(( NF_ - NV )); [ "$BACKLOG" -lt 0 ] && BACKLOG=0
+      if [ "$BACKLOG" -gt 500 ]; then
+        fail "subject verifier alive but ${BACKLOG} frames behind — it may not keep up on this machine (lower OJOGATO_VISION_TILES)"
+      else
+        pass "subject verifier alive (${NV} frames classified, ${BACKLOG} pending)"
+      fi
+    else
+      fail "subject verifier silent for ${AGE}s — reports are falling back to raw frame counts ('ojogato logs')"
     fi
   fi
 
