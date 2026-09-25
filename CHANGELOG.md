@@ -16,6 +16,8 @@ All notable changes to Ojo de Gato are documented here. Format follows
   `--no-send` to build without sending. Checks Telegram's reply instead of assuming delivery.
   Tunables: `OJOGATO_RECAP_MAX`, `OJOGATO_RECAP_MOMENT_SECS`, `OJOGATO_RECAP_SPREAD_MIN`.
 - OpenClaw skill: "send me the recap" / "highlights" runs `ojogato recap`.
+- `report.sh digest --recap` — the evening (21:00) digest now sends the day's recap video in
+  place of the single last-movement clip; the morning digest is unchanged.
 
 ## [0.2.0] — 2026-08-15
 

@@ -1,11 +1,14 @@
 #!/bin/bash
 # Status report -> Telegram: live snapshot photo + activity caption + ~9s last-movement clip; prints the caption.
-# Called by `ojogato report`, the OpenClaw skill, or digest cron jobs. Usage: report.sh [now|digest]
+# Called by `ojogato report`, the OpenClaw skill, or digest cron jobs. Usage: report.sh [now|digest] [--recap]
+#   --recap  send the day's recap video (recap.sh) in place of the last-movement clip —
+#            the evening digest uses it, so the day ends with its highlights, not one clip.
 #
 # Sends via the plain Telegram Bot API (curl) using OJOGATO_TELEGRAM_TOKEN/CHAT — no
 # agent framework in the loop. Last-movement evidence is clip.sh's clip, never a
 # guessed still (still-selection caught the empty aftermath frame; clips replaced it).
 MODE=${1:-now}
+RECAP=0; [ "$2" = "--recap" ] && RECAP=1
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 source "$OJOGATO_HOME/config.env"
 
@@ -98,6 +101,12 @@ else
 (snapshot failed — stream may be down)" >/dev/null
 fi
 
+# Evening digest: the day's recap video replaces the single last-movement clip. recap.sh
+# sends its own video (or its own "nothing to show" note) and prints one line.
+RECAP_LINE=""
+if [ "$RECAP" = "1" ] && [ -x "$BIN/recap.sh" ]; then
+  RECAP_LINE=$("$BIN/recap.sh" 2>/dev/null | tail -1)
+else
 # Short clip of the last real movement (shows the subject, not a guessed still).
 # The timestamp comes from clip.sh's lag-corrected event time, NOT the newest motion
 # frame's filename — frame filenames trail the real event by ~6s (see clip.sh), so the
@@ -137,7 +146,10 @@ if [ -n "$CLIP" ] && [ -s "$CLIP" ]; then
   curl -s -F chat_id="$OJOGATO_TELEGRAM_CHAT" -F video=@"$CLIP" \
     -F caption="$VCAP" "$API/sendVideo" >/dev/null
 fi
+fi
 
 # Tidy old snapshots; print the caption for the calling agent/CLI.
 find "$OJOGATO_HOME/frames" -name 'snap-*.jpg' -mmin +120 -delete 2>/dev/null
 echo "$CAP"
+[ -n "$RECAP_LINE" ] && echo "$RECAP_LINE"
+exit 0

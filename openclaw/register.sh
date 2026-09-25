@@ -223,10 +223,11 @@ if os.path.exists(path):
     with open(path) as f:
         data = json.load(f)
 jobs = data if isinstance(data, list) else data.setdefault("jobs", [])
-msg = ("Use the ojo-gato skill. Run `%s digest` with exec and return its exact output — "
-       "you may prepend ONE short line in your own voice, but never alter the numbers. "
-       "The script sends the media itself." % report)
-def mkjob(jid, expr):
+def mkmsg(args):
+    return ("Use the ojo-gato skill. Run `%s %s` with exec and return its exact output — "
+            "you may prepend ONE short line in your own voice, but never alter the numbers. "
+            "The script sends the media itself." % (report, args))
+def mkjob(jid, expr, msg):
     return {
         "id": jid,
         "name": jid,
@@ -243,10 +244,11 @@ for j in jobs:
     if isinstance(j, dict) and "id" in j:
         existing.add(j["id"])
 added = []
-for jid, expr in [("ojogato-digest-morning", "0 9 * * *"),
-                  ("ojogato-digest-evening", "0 21 * * *")]:
+# The evening digest carries the day's recap video instead of the last-movement clip.
+for jid, expr, args in [("ojogato-digest-morning", "0 9 * * *", "digest"),
+                        ("ojogato-digest-evening", "0 21 * * *", "digest --recap")]:
     if jid not in existing:
-        jobs.append(mkjob(jid, expr))
+        jobs.append(mkjob(jid, expr, mkmsg(args)))
         added.append(jid)
 tmp = path + ".tmp"
 with open(tmp, "w") as f:
