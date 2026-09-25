@@ -4,6 +4,19 @@ All notable changes to Ojo de Gato are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-09-24
+
+### Added
+- **`ojogato recap`** (`recap.sh`) — the day's key moments as one short video, sent to
+  Telegram. Only vision-verified events (pet or person) qualify; they are ranked by how many
+  frames showed the subject, picked with a 15-minute spacing rule so the reel covers the day,
+  then played in chronological order. Each 8s moment is centred on the event's most
+  confident frame (detector-lag corrected, same anchor as the last-movement clip) and carries
+  a time label. `--hours N` for a window other than today, `--max N` (default 8),
+  `--no-send` to build without sending. Checks Telegram's reply instead of assuming delivery.
+  Tunables: `OJOGATO_RECAP_MAX`, `OJOGATO_RECAP_MOMENT_SECS`, `OJOGATO_RECAP_SPREAD_MIN`.
+- OpenClaw skill: "send me the recap" / "highlights" runs `ojogato recap`.
+
 ## [0.2.0] — 2026-08-15
 
 Motion reports stop meaning "pixels changed" and start meaning "a subject was there."

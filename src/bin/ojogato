@@ -1,6 +1,6 @@
 #!/bin/bash
 # ojogato — control CLI for Ojo de Gato.
-# Usage: ojogato setup|on|off|status|doctor|report|clip|logs|update|uninstall
+# Usage: ojogato setup|on|off|status|doctor|report|recap|clip|logs|update|uninstall
 
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 CONFIG="$OJOGATO_HOME/config.env"
@@ -449,6 +449,8 @@ cmd_doctor() {
 # --------------------------------------------------------------------- misc
 cmd_report() { [ -x "$BIN/report.sh" ] || die "report.sh not installed"; exec "$BIN/report.sh" "$@"; }
 
+cmd_recap() { [ -x "$BIN/recap.sh" ] || die "recap.sh not installed — run ojogato update"; exec "$BIN/recap.sh" "$@"; }
+
 cmd_clip() {
   [ -x "$BIN/clip.sh" ] || die "clip.sh not installed"
   OUT=$("$BIN/clip.sh")
@@ -500,6 +502,7 @@ usage: ojogato <command>
   status     services, newest recording age, disk use, last motion
   doctor     health checks with plain-English pass/fail
   report     send a Telegram report now (report.sh)
+  recap      send today's key moments as one video (recap.sh; --hours N for the last N hours)
   clip       cut a short clip around the last movement, print its path
   logs       tail -F all service logs
   update     re-run the installer from the original repo checkout
@@ -516,6 +519,7 @@ case "$CMD" in
   status)    cmd_status ;;
   doctor)    cmd_doctor ;;
   report)    cmd_report "$@" ;;
+  recap)     cmd_recap "$@" ;;
   clip)      cmd_clip ;;
   logs)      cmd_logs ;;
   update)    cmd_update ;;

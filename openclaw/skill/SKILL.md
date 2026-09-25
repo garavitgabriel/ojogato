@@ -1,6 +1,6 @@
 ---
 name: ojo-gato
-description: Check on whatever the Ojo de Gato home camera is watching (OJOGATO_SUBJECT in ~/.ojogato/config.env — cats, a dog, plants, the front door). Use whenever the user asks how the subject is doing, asks to check on them, asks for a camera update, or mentions "ojo gato" or the camera ("how are the cats", "check on the dog", "how are the plants", "camera check", "anything on the camera?", "see the cats"). Reports deterministic motion-based activity and sends a live snapshot plus a last-movement clip to Telegram.
+description: Check on whatever the Ojo de Gato home camera is watching (OJOGATO_SUBJECT in ~/.ojogato/config.env — cats, a dog, plants, the front door). Use whenever the user asks how the subject is doing, asks to check on them, asks for a camera update, or mentions "ojo gato" or the camera ("how are the cats", "check on the dog", "how are the plants", "camera check", "anything on the camera?", "see the cats"), or asks for the day's recap / highlights video. Reports deterministic motion-based activity and sends a live snapshot plus a last-movement clip, or a stitched recap of the day's key moments, to Telegram.
 ---
 
 # Ojo de Gato Skill
@@ -26,6 +26,21 @@ activity summary conversationally, e.g. "Just checked — last activity 4 minute
 pretty active this afternoon. Sent you a live shot and the last-movement clip."
 If the user asks where to watch live, the URL is in the script's output (it comes from
 `OJOGATO_LIVE_URL` and needs Tailscale on the phone).
+
+## Day recap ("send me the recap", "what did they do today?", "highlights")
+
+Run this with exec and relay its printed output, spoken naturally:
+
+```
+$HOME/.ojogato/bin/ojogato recap
+```
+
+It picks the day's key moments (only ones where a cat or person was actually recognised),
+stitches them into one short time-labelled video, and **sends the video itself** to
+Telegram. It takes up to a minute or two — tell the user it's on the way before you run it.
+For a window other than today ("last night", "the last 3 hours") pass `--hours N`, e.g.
+`ojogato recap --hours 12`. If the output says there's nothing to show, say that plainly —
+never promise a video that the script didn't send.
 
 ## Scheduled digest
 
