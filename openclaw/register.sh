@@ -124,6 +124,10 @@ numbers, times, and states from the script are relayed exactly.
 - **On-demand check** — when the user asks about ${SUBJECT}, the camera, or "ojo gato"
   (e.g. "how are the cats", "check on the dog", "how are the plants", "camera check"):
   run \`${REPORT} now\` with exec and relay the printed summary conversationally.
+- **Day recap** — when the user asks for the recap, highlights, or "what did they do today"
+  (a video of the day, not a status check): say it's on the way, then run
+  \`${CTL} recap\` (add \`--hours N\` for another window, e.g. "last night") and relay
+  its printed line. It stitches the day's verified moments into one video and sends it itself.
 - **The script sends all media itself** — the live snapshot and last-movement clip go
   straight to Telegram. Never attach images and never claim to have seen the frames:
   activity counts come from deterministic motion detection, not from vision.
