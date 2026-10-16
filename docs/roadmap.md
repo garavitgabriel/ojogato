@@ -2,9 +2,13 @@
 
 v1 is macOS-only, single-camera, deterministic-only. These are the directions for v2, roughly in priority order. The design constraint stays fixed throughout: **the deterministic core never depends on an LLM** — new intelligence is always an optional layer on top of a pipeline that works without it.
 
+## MCP server (next: v0.4.0)
+
+Any MCP-capable agent can query the camera: status and verified events as JSON, the snapshot and an event's best frame as images the agent can look at, and clips/recaps as tailnet links. Design: [mcp-server.md](mcp-server.md).
+
 ## Linux / VPS support
 
-The pipeline is already 90% portable: mediamtx, ffmpeg, and shell. The macOS-specific parts are exactly two — the `avfoundation` camera input and launchd. The port is:
+The pipeline is already 90% portable: mediamtx, ffmpeg, and shell. The macOS-specific parts are three: the `avfoundation` camera input, launchd, and subject recognition (Apple's Vision framework, which would need an on-device replacement such as a small local detector model). The port is:
 
 - **RTSP input instead of avfoundation.** On Linux the capture source becomes any RTSP camera (or a v4l2 device). Everything downstream — mediamtx, the fragmented-mp4 recorder, the mpdecimate motion detector, report/clip/heartbeat — consumes RTSP already and moves unchanged.
 - **systemd units instead of launchd plists.** Same six services, same labels, rendered as unit files.

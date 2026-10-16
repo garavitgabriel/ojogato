@@ -18,7 +18,7 @@ It wires four things into your OpenClaw installation. **Every file it touches ge
 
 3. **Adds exec-approvals allowlist entries** for the ojogato scripts to agent `main`, so the agent can run the report without a manual approval prompt every time — and can run *only* those scripts, nothing broader.
 
-4. **Optionally installs the two digest cron jobs** into `~/.openclaw/cron/jobs.json` — the 9am and 9pm digests, delivered through the agent. You're asked before this happens; skip it and digests can still run through plain launchd.
+4. **Optionally installs the two digest cron jobs** into `~/.openclaw/cron/jobs.json` — the 9am and 9pm digests, delivered through the agent. You're asked before this happens. Skip it and there are no scheduled digests; the watchdog still alerts you directly.
 
 To undo everything, `openclaw/unregister.sh` reverses each step, restoring from the backups where appropriate.
 
