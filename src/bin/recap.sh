@@ -34,16 +34,34 @@ REC="$OJOGATO_HOME/recordings"
 HOURS=""
 MAX="${OJOGATO_RECAP_MAX:-8}"
 SEND=1
+JSON=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --hours)   HOURS="$2"; shift 2 ;;
     --max)     MAX="$2"; shift 2 ;;
     --no-send) SEND=0; shift ;;
+    # --json (for agents, used with --no-send): one JSON object instead of path + caption,
+    # {"path","caption","moments":[{"event_id","time_hhmm","verdict"}]}; path null and
+    # moments [] when there is nothing to show. --json never sends, even without --no-send.
+    --json)    JSON=1; SEND=0; shift ;;
     *) echo "recap.sh: unknown option $1" >&2; exit 2 ;;
   esac
 done
+[ "$JSON" = "1" ] && . "$BIN/ojogato-json.sh"
+MOMENTS=""
 
-if [ -f "$OJOGATO_HOME/PAUSED" ]; then echo "ojogato is paused (ojogato off)"; exit 0; fi
+# say_nothing <caption> — the "no video" exits: tell the chat (when sending), then print.
+say_nothing() {
+  send_text "$1"
+  if [ "$JSON" = "1" ]; then printf '{"path":null,"caption":%s,"moments":[]}\n' "$(json_str "$1")"
+  else echo "$1"; fi
+  exit 0
+}
+
+if [ -f "$OJOGATO_HOME/PAUSED" ]; then
+  [ "$JSON" = "1" ] && { printf '{"path":null,"caption":%s,"moments":[]}\n' "$(json_str "ojogato is paused (ojogato off)")"; exit 0; }
+  echo "ojogato is paused (ojogato off)"; exit 0
+fi
 
 LAG="${OJOGATO_DETECT_LAG:-6}"
 MOMENT="${OJOGATO_RECAP_MOMENT_SECS:-8}"     # seconds per moment
@@ -70,6 +88,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
     rm -rf "$LOCK"; mkdir "$LOCK"
   else
+    [ "$JSON" = "1" ] && json_fail 1 "a recap is already being put together — try again in a minute"
     echo "A recap is already being put together — it'll arrive in a minute."; exit 0
   fi
 fi
@@ -91,7 +110,7 @@ TOTAL=$(printf '%s' "$ALL" | grep -c . )
 
 if [ "$TOTAL" -eq 0 ]; then
   CAP="🎬 No recap for ${SPAN} yet — nothing recognisable has crossed the camera."
-  send_text "$CAP"; echo "$CAP"; exit 0
+  say_nothing "$CAP"
 fi
 
 PICKED=$(printf '%s\n' "$ALL" | sort -t$'\t' -k4,4nr -k6,6nr | awk -F'\t' -v max="$MAX" -v gap="$(( SPREAD * 60 ))" '
@@ -153,6 +172,7 @@ while IFS=$'\t' read -r st en nf ns verdict score best bframe sfirst slast; do
     "$WORK/m$(printf '%02d' "$i").mp4" 2>>"$WORK/ffmpeg.err"
   [ -s "$WORK/m$(printf '%02d' "$i").mp4" ] || continue
   KEPT=$(( KEPT + 1 ))
+  MOMENTS="$MOMENTS${MOMENTS:+,}{\"event_id\":\"$st\",\"time_hhmm\":\"$HM\",\"verdict\":\"$verdict\"}"
   [ -z "$FIRST_HM" ] && FIRST_HM=$HM
   LAST_HM=$HM
 done <<EOF
@@ -161,7 +181,7 @@ EOF
 
 if [ "$KEPT" -eq 0 ]; then
   CAP="🎬 ${TOTAL} sighting(s) ${SPAN}, but the footage for them has already rolled off the recordings."
-  send_text "$CAP"; echo "$CAP"; exit 0
+  say_nothing "$CAP"
 fi
 
 OUT="$OJOGATO_HOME/frames/recap-$(date +%Y%m%d-%H%M).mp4"
@@ -170,6 +190,7 @@ ls "$WORK"/m[0-9][0-9].mp4 | sed "s/.*/file '&'/" > "$WORK/all.concat"
   -movflags +faststart "$OUT" 2>>"$WORK/ffmpeg.err"
 if [ ! -s "$OUT" ]; then
   CAP="🎬 Recap failed while stitching the moments together — try again in a bit."
+  [ "$JSON" = "1" ] && json_fail 1 "recap failed while stitching the moments together"
   send_text "$CAP"; echo "$CAP"; exit 1
 fi
 
@@ -183,6 +204,10 @@ CAP="🎬 ${SUBJECT_CAP}, ${SPAN}: ${KEPT} $(plural "$KEPT" moment), ${RANGE}"
 👤 ${PEOPLE} of them $( [ "$PEOPLE" = "1" ] && echo "is a person" || echo "are people")."
 
 if [ "$SEND" = "0" ] || [ -z "${OJOGATO_TELEGRAM_TOKEN}" ] || [ -z "${OJOGATO_TELEGRAM_CHAT}" ]; then
+  if [ "$JSON" = "1" ]; then
+    printf '{"path":%s,"caption":%s,"moments":[%s]}\n' "$(json_str "$OUT")" "$(json_str "$CAP")" "$MOMENTS"
+    exit 0
+  fi
   echo "$OUT"; echo "$CAP"; exit 0
 fi
 
