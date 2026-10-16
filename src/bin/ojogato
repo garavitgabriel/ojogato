@@ -1,6 +1,6 @@
 #!/bin/bash
 # ojogato — control CLI for Ojo de Gato.
-# Usage: ojogato setup|on|off|status|doctor|report|recap|clip|logs|update|uninstall
+# Usage: ojogato setup|on|off|status|doctor|report|recap|clip|mcp|logs|update|uninstall
 
 OJOGATO_HOME="${OJOGATO_HOME:-$HOME/.ojogato}"
 CONFIG="$OJOGATO_HOME/config.env"
@@ -10,7 +10,10 @@ APP="$OJOGATO_HOME/OjoGato.app"
 APP_BIN="$APP/Contents/MacOS/ojogato-capture"
 U=$(id -u)
 
-ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat"
+ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp"
+# Not camera services: `off` leaves them loaded. digest.sh idles unless DIGEST_MODE is
+# standalone, and the MCP server (opt-in, OJOGATO_MCP_ENABLED=1) reports paused itself.
+AUX_SERVICES="com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp"
 CAM_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup"
 
 step() { printf '▸ %s\n' "$*"; }
@@ -40,6 +43,46 @@ boot_svc() {
 }
 
 port_open() { ( : </dev/tcp/127.0.0.1/"$1" ) 2>/dev/null; }
+
+mcp_enabled() { [ "${OJOGATO_MCP_ENABLED:-0}" = "1" ]; }
+
+gen_token() { openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \n'; }
+
+ts_bin() {
+  if command -v tailscale >/dev/null 2>&1; then command -v tailscale
+  elif [ -x "/Applications/Tailscale.app/Contents/MacOS/Tailscale" ]; then echo "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  fi
+}
+
+# The URL an agent connects to. OJOGATO_MCP_PUBLIC_URL wins; otherwise it is derived from
+# the bind the server uses — for bind=tailscale, the MagicDNS name when there is one.
+mcp_url() {
+  local base="${OJOGATO_MCP_PUBLIC_URL%/}" bind="${OJOGATO_MCP_BIND:-127.0.0.1}" port="${OJOGATO_MCP_PORT:-8790}" host="" ts
+  if [ -z "$base" ]; then
+    if [ "$bind" = "tailscale" ]; then
+      ts=$(ts_bin)
+      if [ -n "$ts" ] && command -v python3 >/dev/null 2>&1; then
+        host=$("$ts" status --json 2>/dev/null | python3 -c '
+import json,sys
+try: print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))
+except Exception: pass' 2>/dev/null)
+      fi
+      [ -z "$host" ] && [ -n "$ts" ] && host=$("$ts" ip -4 2>/dev/null | head -1)
+      [ -n "$host" ] || { echo "ojogato: OJOGATO_MCP_BIND=tailscale but Tailscale isn't connected" >&2; return 1; }
+    else
+      host="$bind"
+    fi
+    base="http://$host:$port"
+  fi
+  echo "$base/mcp"
+}
+
+digest_mode() {
+  if [ -n "$OJOGATO_DIGEST_MODE" ]; then echo "$OJOGATO_DIGEST_MODE"
+  elif [ -d "$HOME/.openclaw" ]; then echo "agent"
+  else echo "standalone"; fi
+}
+openclaw_digest_jobs() { grep -qE 'ojogato-digest-(morning|evening)' "$HOME/.openclaw/cron/jobs.json" 2>/dev/null; }
 
 # --------------------------------------------------------------------- setup
 cmd_setup() {
@@ -217,6 +260,14 @@ except Exception: pass' 2>/dev/null)
     echo "  Install Tailscale for private remote viewing (docs/privacy-and-networking.md)."
   fi
 
+  # The MCP server's bearer token. install.sh normally made one already; this covers a
+  # config.env written by hand. Generated, never shown here (ojogato mcp token prints it).
+  if [ -z "$OJOGATO_MCP_TOKEN" ]; then
+    set_config OJOGATO_MCP_TOKEN "$(gen_token)"
+    echo ""
+    echo "  ✔ generated an MCP token for agents (see it with: ojogato mcp token)"
+  fi
+
   echo ""
   step "Setup done. Check everything with: ojogato doctor"
 }
@@ -260,6 +311,10 @@ cmd_on() {
     boot_svc "$L"
   done
   [ -z "$(svc_pid com.ojogato.heartbeat)" ] && boot_svc com.ojogato.heartbeat
+  # digest has no running pid between its 09:00/21:00 runs, so ask launchd whether it's loaded.
+  launchctl list com.ojogato.digest >/dev/null 2>&1 || boot_svc com.ojogato.digest
+  load_config
+  if mcp_enabled && [ -z "$(svc_pid com.ojogato.mcp)" ]; then boot_svc com.ojogato.mcp; fi
   echo "▸ Ojo de Gato ON — stream + recording resuming (give it ~10s)."
 }
 
@@ -268,9 +323,23 @@ cmd_status() {
   load_config
   if [ -f "$OJOGATO_HOME/PAUSED" ]; then echo "state: PAUSED (ojogato on to resume)"; else echo "state: RUNNING"; fi
   for L in $ALL_SERVICES; do
+    if [ "$L" = "com.ojogato.mcp" ] && ! mcp_enabled; then echo "  $L: disabled"; continue; fi
     P=$(svc_pid "$L")
+    if [ -z "$P" ] && [ "$L" = "com.ojogato.digest" ] && launchctl list "$L" >/dev/null 2>&1; then P="scheduled (09:00, 21:00)"; fi
     echo "  $L: ${P:-stopped}"
   done
+  if mcp_enabled; then
+    echo "  mcp: enabled — $(mcp_url 2>/dev/null || echo "bind ${OJOGATO_MCP_BIND:-127.0.0.1} unresolved") (token $([ -n "$OJOGATO_MCP_TOKEN" ] && echo set || echo MISSING))"
+  else
+    echo "  mcp: disabled (OJOGATO_MCP_ENABLED=1 to let agents connect — docs/mcp-server.md)"
+  fi
+  DM=$(digest_mode)
+  case "$DM" in
+    standalone) if openclaw_digest_jobs; then echo "  digest mode: standalone — but OpenClaw digest crons exist, so the job stands down (no double send)"
+                else echo "  digest mode: standalone (ojogato sends the 09:00 / 21:00 digests)"; fi ;;
+    agent)      echo "  digest mode: agent (your agent's scheduler sends digests; ojogato's job idles)" ;;
+    *)          echo "  digest mode: $DM (no scheduled digests)" ;;
+  esac
   N=$(ls -t "$OJOGATO_HOME/recordings"/*.mp4 2>/dev/null | head -1)
   if [ -n "$N" ]; then
     echo "  newest recording: $(( ($(date +%s) - $(stat -f %m "$N")) / 60 )) min old"
@@ -351,14 +420,44 @@ cmd_doctor() {
 
   # services
   for L in $ALL_SERVICES; do
-    if $PAUSED && [ "$L" != "com.ojogato.heartbeat" ]; then continue; fi
+    if $PAUSED && ! echo " $AUX_SERVICES " | grep -q " $L "; then continue; fi
+    if [ "$L" = "com.ojogato.mcp" ] && ! mcp_enabled; then
+      note "$L disabled (OJOGATO_MCP_ENABLED=0)"; continue
+    fi
     P=$(svc_pid "$L")
     if [ -n "$P" ]; then
       pass "$L is loaded (${P})"
+    elif [ "$L" = "com.ojogato.digest" ] && launchctl list "$L" >/dev/null 2>&1; then
+      pass "$L is loaded (runs at 09:00 and 21:00)"
     else
       fail "$L is not loaded — try 'ojogato on' (or re-run install.sh)"
     fi
   done
+
+  # MCP server prerequisites — only when the user turned it on.
+  if mcp_enabled; then
+    PYV=$(/usr/bin/python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+    if [ -z "$PYV" ]; then
+      fail "MCP enabled but /usr/bin/python3 doesn't run — install Xcode Command Line Tools (xcode-select --install)"
+    elif [ "$(echo "$PYV" | cut -d. -f1)" -gt 3 ] || { [ "$(echo "$PYV" | cut -d. -f1)" -eq 3 ] && [ "$(echo "$PYV" | cut -d. -f2)" -ge 9 ]; }; then
+      pass "python3 $PYV for the MCP server (needs ≥ 3.9)"
+    else
+      fail "MCP server needs python3 ≥ 3.9; /usr/bin/python3 is $PYV"
+    fi
+    [ -f "$OJOGATO_HOME/mcp/ojogato_mcp.py" ] && pass "MCP server installed ($OJOGATO_HOME/mcp)" \
+      || fail "MCP enabled but $OJOGATO_HOME/mcp/ojogato_mcp.py is missing — re-run install.sh"
+    [ -n "$OJOGATO_MCP_TOKEN" ] && pass "MCP bearer token set" \
+      || fail "MCP enabled with an empty OJOGATO_MCP_TOKEN — run 'ojogato setup' to generate one"
+    [ "${OJOGATO_MCP_BIND:-127.0.0.1}" = "0.0.0.0" ] && fail "OJOGATO_MCP_BIND=0.0.0.0 is refused — use 127.0.0.1, tailscale or a specific IP"
+  fi
+
+  # digests: exactly one sender
+  DM=$(digest_mode)
+  if [ "$DM" = "standalone" ] && openclaw_digest_jobs; then
+    note "digest mode standalone, but OpenClaw's digest crons exist — ojogato's job stands down; set OJOGATO_DIGEST_MODE=agent to make that explicit"
+  else
+    note "digest mode: $DM"
+  fi
 
   if ! $PAUSED; then
     # stream endpoints
@@ -463,6 +562,28 @@ cmd_clip() {
   fi
 }
 
+cmd_mcp() {
+  load_config
+  case "${1:-status}" in
+    status)
+      if mcp_enabled; then echo "▸ MCP server: enabled"; else echo "▸ MCP server: disabled (set OJOGATO_MCP_ENABLED=\"1\" in $CONFIG, then: ojogato on)"; fi
+      echo "  bind:     ${OJOGATO_MCP_BIND:-127.0.0.1}:${OJOGATO_MCP_PORT:-8790}"
+      echo "  url:      $(mcp_url 2>/dev/null || echo "unresolved (Tailscale not connected?)")"
+      echo "  token:    $([ -n "$OJOGATO_MCP_TOKEN" ] && echo "set (ojogato mcp token)" || echo "MISSING — run: ojogato setup")"
+      echo "  media:    signed links valid ${OJOGATO_MCP_MEDIA_TTL:-3600}s"
+      P=$(svc_pid com.ojogato.mcp)
+      echo "  service:  com.ojogato.mcp ${P:-not running}"
+      [ -f "$OJOGATO_HOME/mcp/ojogato_mcp.py" ] || echo "  ⚠ $OJOGATO_HOME/mcp/ojogato_mcp.py not installed — re-run install.sh"
+      ;;
+    token)
+      [ -n "$OJOGATO_MCP_TOKEN" ] || die "no MCP token yet — run: ojogato setup"
+      echo "$OJOGATO_MCP_TOKEN"
+      ;;
+    url) mcp_url || exit 1 ;;
+    *) die "usage: ojogato mcp [status|token|url]" ;;
+  esac
+}
+
 cmd_logs() {
   FILES=$(ls "$OJOGATO_HOME/logs"/*.log "$OJOGATO_HOME/logs"/*.err 2>/dev/null)
   [ -n "$FILES" ] || die "no log files yet in $OJOGATO_HOME/logs"
@@ -504,6 +625,7 @@ usage: ojogato <command>
   report     send a Telegram report now (report.sh)
   recap      send today's key moments as one video (recap.sh; --hours N for the last N hours)
   clip       cut a short clip around the last movement, print its path
+  mcp        MCP server for agents: mcp [status|token|url]
   logs       tail -F all service logs
   update     re-run the installer from the original repo checkout
   uninstall  remove services (and optionally all data)
@@ -521,6 +643,7 @@ case "$CMD" in
   report)    cmd_report "$@" ;;
   recap)     cmd_recap "$@" ;;
   clip)      cmd_clip ;;
+  mcp)       cmd_mcp "$@" ;;
   logs)      cmd_logs ;;
   update)    cmd_update ;;
   uninstall) cmd_uninstall "$@" ;;

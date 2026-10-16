@@ -15,7 +15,7 @@ REPO_DIR=$(cd "$(dirname "$0")" && pwd)
 OJOGATO_HOME="$HOME/.ojogato"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 U=$(id -u)
-SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat"
+SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp"
 
 DRY_RUN=false
 LINK_MODE=false
@@ -219,6 +219,37 @@ for f in "$REPO_DIR"/src/bin/*; do
 done
 [ -f "$REPO_DIR/src/bin/ojogato" ] || warn "src/bin/ojogato missing from repo — CLI not installed"
 
+# ---------------------------------------------------------------- MCP server
+# src/mcp/ is the stdlib-only MCP server (docs/mcp-server.md). It is installed even with
+# OJOGATO_MCP_ENABLED=0, so turning it on later is a config change rather than a
+# reinstall; only the launchd service is gated on the flag. A checkout without src/mcp/
+# simply skips it — nothing else in the stack depends on the server.
+MCP_SRC="$REPO_DIR/src/mcp"
+MCP_DEST="$OJOGATO_HOME/mcp"
+if [ ! -d "$MCP_SRC" ]; then
+  step "MCP server"
+  info "src/mcp/ not in this checkout — skipping the MCP server (nothing else depends on it)"
+else
+  if $LINK_MODE; then step "Linking src/mcp → ~/.ojogato/mcp (dev mode)"; else step "Copying src/mcp → ~/.ojogato/mcp"; fi
+  [ -L "$MCP_DEST" ] && run rm -f "$MCP_DEST"
+  run mkdir -p "$MCP_DEST"
+  for f in "$MCP_SRC"/*; do
+    [ -e "$f" ] || continue
+    base=$(basename "$f")
+    [ "$base" = "__pycache__" ] && continue
+    dest="$MCP_DEST/$base"
+    if $LINK_MODE; then
+      [ -d "$dest" ] && [ ! -L "$dest" ] && run rm -rf "$dest"   # a copied dir from a copy-mode install
+      run ln -sfn "$f" "$dest"
+      info "linked mcp/$base"
+    else
+      run rm -rf "$dest"            # never cp through a stale --link symlink into the repo
+      run cp -R "$f" "$dest"
+      info "installed mcp/$base"
+    fi
+  done
+fi
+
 # ---------------------------------------------------------------- vision verifier
 # Compiled, not shipped as a binary: it links against the OS Vision framework, so the
 # build has to happen against whatever macOS SDK this machine has. swiftc comes with the
@@ -370,7 +401,9 @@ for t in "$REPO_DIR"/src/templates/com.ojogato.*.plist.tmpl; do
   render "$t" "$LAUNCH_AGENTS/$(basename "$t" .tmpl)"
   PLIST_COUNT=$((PLIST_COUNT + 1))
 done
-[ "$PLIST_COUNT" -eq 7 ] || warn "expected 7 launchd plist templates, found $PLIST_COUNT"
+PLIST_WANT=8   # 7 pipeline services + digest; the MCP template ships with src/mcp
+[ -f "$REPO_DIR/src/templates/com.ojogato.mcp.plist.tmpl" ] && PLIST_WANT=9
+[ "$PLIST_COUNT" -eq "$PLIST_WANT" ] || warn "expected $PLIST_WANT launchd plist templates, found $PLIST_COUNT"
 
 if [ -f "$REPO_DIR/src/templates/mediamtx.yml.tmpl" ]; then
   render "$REPO_DIR/src/templates/mediamtx.yml.tmpl" "$OJOGATO_HOME/mediamtx.yml"
@@ -386,8 +419,10 @@ fi
 # ---------------------------------------------------------------- config
 step "Config"
 CONFIG="$OJOGATO_HOME/config.env"
+CONFIG_EXISTED=false
 if [ -f "$CONFIG" ]; then
-  info "config.env exists — keeping it untouched"
+  CONFIG_EXISTED=true
+  info "config.env exists — keeping your values (only keys it lacks get added below)"
   run chmod 600 "$CONFIG"
 elif [ -f "$REPO_DIR/src/templates/config.env.example" ]; then
   run cp "$REPO_DIR/src/templates/config.env.example" "$CONFIG"
@@ -395,6 +430,53 @@ elif [ -f "$REPO_DIR/src/templates/config.env.example" ]; then
   info "created config.env from example (chmod 600)"
 else
   warn "config.env.example missing and no config.env present — runtime scripts will fail until it exists"
+fi
+
+# v0.4.0 keys. A config from an older install lacks them, so append what's missing with
+# its default — append only, never rewrite a value that is already there. Then fill the
+# two that need deciding: who sends digests, and the MCP bearer token.
+#
+# OJOGATO_DIGEST_MODE: agent when OpenClaw is installed (its digest crons are the sender),
+# standalone otherwise. digest.sh additionally stands down if it finds those crons, so a
+# wrong guess here can't cause a double send.
+DIGEST_DEFAULT="standalone"
+[ -d "$HOME/.openclaw" ] && DIGEST_DEFAULT="agent"
+cfg_get() { ( . "$CONFIG" >/dev/null 2>&1; eval "printf '%s' \"\${$1}\"" ); }
+cfg_set() { # cfg_set KEY VALUE [label-for-dry-run]
+  if $DRY_RUN; then info "[dry-run] set $1=${3:-\"$2\"} in config.env"; return; fi
+  if grep -q "^$1=" "$CONFIG"; then
+    sed -i "" "s|^$1=.*|$1=\"$2\"|" "$CONFIG"
+  else
+    printf '%s="%s"\n' "$1" "$2" >> "$CONFIG"
+  fi
+}
+gen_token() {
+  openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+}
+if [ -f "$CONFIG" ]; then
+  ADDED=""
+  for kv in OJOGATO_DIGEST_MODE= OJOGATO_MCP_ENABLED=0 OJOGATO_MCP_BIND=127.0.0.1 OJOGATO_MCP_PORT=8790 \
+            OJOGATO_MCP_TOKEN= OJOGATO_MCP_PUBLIC_URL= OJOGATO_MCP_MEDIA_TTL=3600; do
+    k=${kv%%=*}; v=${kv#*=}
+    grep -q "^$k=" "$CONFIG" && continue
+    ADDED="$ADDED $k"
+    if $DRY_RUN; then info "[dry-run] append $k=\"$v\" to config.env"; else printf '%s="%s"\n' "$k" "$v" >> "$CONFIG"; fi
+  done
+  [ -n "$ADDED" ] && ! $DRY_RUN && info "added new config keys:$ADDED"
+  if [ -z "$(cfg_get OJOGATO_DIGEST_MODE)" ]; then
+    cfg_set OJOGATO_DIGEST_MODE "$DIGEST_DEFAULT"
+    $DRY_RUN || info "OJOGATO_DIGEST_MODE=$DIGEST_DEFAULT ($([ "$DIGEST_DEFAULT" = agent ] && echo "~/.openclaw found — the agent sends digests" || echo "no ~/.openclaw — ojogato sends digests itself"))"
+  else
+    info "OJOGATO_DIGEST_MODE=$(cfg_get OJOGATO_DIGEST_MODE) (kept)"
+  fi
+  if [ -z "$(cfg_get OJOGATO_MCP_TOKEN)" ]; then
+    if $DRY_RUN; then cfg_set OJOGATO_MCP_TOKEN "" "<openssl rand -hex 32>"
+    else cfg_set OJOGATO_MCP_TOKEN "$(gen_token)"; info "generated OJOGATO_MCP_TOKEN (see it with: ojogato mcp token)"; fi
+  fi
+  run chmod 600 "$CONFIG"
+elif $DRY_RUN; then
+  info "[dry-run] set OJOGATO_DIGEST_MODE=\"$DIGEST_DEFAULT\" in config.env ($([ -d "$HOME/.openclaw" ] && echo "~/.openclaw found" || echo "no ~/.openclaw"))"
+  info "[dry-run] set OJOGATO_MCP_TOKEN=<openssl rand -hex 32> in config.env (chmod 600)"
 fi
 
 # ---------------------------------------------------------------- install metadata
@@ -424,7 +506,7 @@ done
 
 if [ -f "$OJOGATO_HOME/PAUSED" ]; then
   warn "PAUSED flag present — camera services stay off. Loading heartbeat only; run 'ojogato on' when ready."
-  BOOT_LIST="com.ojogato.heartbeat"
+  BOOT_LIST="com.ojogato.heartbeat com.ojogato.digest"
 else
   BOOT_LIST="com.ojogato.mediamtx"
 fi
@@ -442,9 +524,20 @@ boot() { # boot <label>
 for L in $BOOT_LIST; do boot "$L"; done
 if [ ! -f "$OJOGATO_HOME/PAUSED" ]; then
   $DRY_RUN || sleep 2   # let mediamtx open 8554 before the publishers connect
-  for L in com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat; do
+  for L in com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest; do
     boot "$L"
   done
+fi
+# The MCP server is not a camera service (PAUSED doesn't gate it; its tools report paused),
+# but it only ever runs when the user opted in.
+MCP_ON=""
+[ -f "$CONFIG" ] && MCP_ON=$(cfg_get OJOGATO_MCP_ENABLED)
+if [ "$MCP_ON" = "1" ] && { $DRY_RUN || [ -f "$MCP_DEST/ojogato_mcp.py" ]; }; then
+  boot com.ojogato.mcp
+elif [ "$MCP_ON" = "1" ]; then
+  warn "OJOGATO_MCP_ENABLED=1 but $MCP_DEST/ojogato_mcp.py is missing — MCP server not started"
+else
+  info "com.ojogato.mcp not started (OJOGATO_MCP_ENABLED=${MCP_ON:-0} — set it to 1 in config.env, then: ojogato on)"
 fi
 
 # ---------------------------------------------------------------- handoff
