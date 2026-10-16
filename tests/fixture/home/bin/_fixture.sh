@@ -1,6 +1,6 @@
 #!/bin/bash
 # Shared helper for the fixture stubs. Each stub emits EXACTLY the contract JSON from
-# .parallel-plans/2026-10-15-2129-mcp-server-v040.md, never touches a camera, never sends.
+# the script contract in docs/mcp-server.md, never touches a camera, never sends.
 #   OJOGATO_FIXTURE_MODE = happy (default) | empty | error
 #   OJOGATO_FIXTURE_LOG  = optional file; "send" stubs append a line so tests can see the call
 FX_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

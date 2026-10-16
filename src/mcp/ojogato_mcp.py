@@ -16,7 +16,7 @@ Transports:
                      GET /media/<signed> for clips and frames. Bearer token required.
 
 Python 3.9, stdlib only (the version Xcode Command Line Tools puts on the camera Mac).
-Design: docs/mcp-server.md. Script output contract: .parallel-plans/2026-10-15-2129-mcp-server-v040.md.
+Design: docs/mcp-server.md. Script output contract: docs/mcp-server.md, "How the tools map onto the pipeline".
 """
 
 import argparse
