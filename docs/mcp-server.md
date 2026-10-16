@@ -1,8 +1,14 @@
-# MCP server — design (draft, v0.4.0)
+# MCP server (v0.4.0)
 
-> Status: **design, not built.** Goal: any MCP-capable agent (Hermes, Claude Code, Codex)
-> can use Ojo de Gato, including an agent on a remote server reaching a camera
-> Mac at home over Tailscale.
+> Status: **built (v0.4.0), not yet tested on a real camera.** It passes its smoke test
+> (`tests/mcp/smoke.py`) against a fixture `OJOGATO_HOME` on Python 3.9 and 3.14, and a live
+> Claude Code client listed its tools and viewed an image from it. End-to-end on the camera
+> Mac comes before release. Goal: any MCP-capable agent (Hermes, Claude Code, Codex) can use
+> Ojo de Gato, including an agent on a remote server reaching a camera Mac at home over
+> Tailscale.
+>
+> Code: `src/mcp/ojogato_mcp.py` (installed to `~/.ojogato/mcp/`). Service:
+> `com.ojogato.mcp` (HTTP mode), loaded only when `OJOGATO_MCP_ENABLED=1`.
 
 ## The core question: agents can't watch video
 
@@ -68,19 +74,161 @@ MCP clients don't wake up when a server sends a notification. So:
   configured. If that agent sends a frame to a cloud LLM, that's the agent's own model
   making that call, and the README says so plainly.
 
-## Pipeline changes needed
+## How the tools map onto the pipeline
 
-- Standalone digests: a `com.ojogato.digest` launchd job, so 9am/9pm digests don't need an
-  agent's scheduler.
+The server holds no camera logic. Every tool shells out to a script in `~/.ojogato/bin`
+that prints one JSON object (the v0.4.0 script contract), with a timeout (recap 180 s,
+everything else 30 s). A script that fails, times out or prints something that isn't JSON
+becomes an MCP tool error (`isError: true`) carrying the script's message (for example
+`snapshot.sh: stream down` or `events.sh: no such event`). The server itself keeps running.
 
-- `report.sh` / a new `status.sh --json`: machine-readable status (today it only prints a
-  human caption).
-- `clip.sh`: print metadata + path without sending (`recap.sh` already has `--no-send`).
-- Stable `event_id` (`start_epoch`) in `events.sh --json` and a way to resolve it to its best
-  frame.
-- Contact sheet: one ffmpeg `tile` call over N frames sampled from the clip.
+| Tool | Script(s) |
+|---|---|
+| `camera_status` | `status.sh --json` |
+| `list_events` | `events.sh --json --hours N [--real-only] [--since E]` (the window widens to reach `since_epoch`, up to 168 h) |
+| `get_snapshot` | `snapshot.sh --max-width N` |
+| `get_event_frame` | `events.sh --event ID --json`, then the event's `best_frame` from `motionframes/` |
+| `get_last_clip` | `clip.sh --json` + `contact-sheet.sh`; `deliver="telegram"` also runs `report.sh now` |
+| `get_recap` | `recap.sh --no-send --json` + `contact-sheet.sh`; `deliver="telegram"` runs `recap.sh` (its own send path) and returns the caption only, so the slow build isn't done twice |
+
+Image results are an MCP `image` block (base64 JPEG, `mimeType: image/jpeg`) next to a
+`text` block holding the JSON facts. An event with no recognised subject has no best frame:
+`get_event_frame` then says so in the facts and returns no image. That isn't an error.
+
+## Media links
+
+`deliver="url"` returns `url` and `url_expires_at`:
+
+```
+http://<OJOGATO_MCP_PUBLIC_URL or bind:port>/media/<b64(path)>.<expiry>.<hmac>/<filename>
+```
+
+The signature is HMAC-SHA256 over the path (relative to `~/.ojogato/frames/`) and the expiry,
+keyed with `OJOGATO_MCP_TOKEN`. Links last `OJOGATO_MCP_MEDIA_TTL` seconds (default 3600).
+The server checks the signature, then the expiry, then that the real path (symlinks resolved)
+is still inside `frames/`. Anything else gets a 403, so a link can't reach `config.env`,
+recordings or anything outside `frames/`. Byte ranges are supported, since iOS Safari won't
+play an mp4 without them. Clip links point at `frames/lastmove.mp4`, which the next clip
+overwrites, so an old link plays whatever the newest clip is until it expires.
+
+In stdio mode there's no HTTP listener in that process. The link points at the
+`com.ojogato.mcp` service, so it only works when that service is running. With no token
+configured, `url` is `null` and `url_error` says why.
+
+## Running it
+
+```sh
+# stdio, for an agent on the camera Mac itself
+/usr/bin/python3 ~/.ojogato/mcp/ojogato_mcp.py --stdio
+
+# HTTP, normally via launchd (ojogato on, with OJOGATO_MCP_ENABLED=1)
+/usr/bin/python3 ~/.ojogato/mcp/ojogato_mcp.py --http
+```
+
+The server reads `~/.ojogato/config.env` itself (`KEY="value"` lines). Environment
+variables override single keys. HTTP mode refuses to start with an empty
+`OJOGATO_MCP_TOKEN`, or when the bind is a wildcard (`0.0.0.0`, `::`).
+`OJOGATO_MCP_BIND=tailscale` takes the first address from `tailscale ip -4`. Logs go to
+stderr (`~/.ojogato/logs/mcp.err` under launchd), with media signatures redacted.
+
+HTTP details: `POST /mcp` takes a JSON-RPC message or batch and answers `application/json`
+(notifications get `202`). `initialize` returns an `Mcp-Session-Id`. A request that sends an
+unknown session id gets `404` so the client re-initializes, and `DELETE /mcp` ends a session.
+`GET /mcp` is `405`, since there's no SSE stream. A request with no bearer token, or the
+wrong one, gets `401`. A browser `Origin` that isn't localhost, the bind IP or the public URL
+host gets `403`. Supported protocol versions: `2025-11-25`, `2025-06-18`, `2025-03-26` and
+`2024-11-05`. A client asking for any other version gets the newest.
+
+## Connecting an agent
+
+Get the token and URL on the camera Mac with `ojogato mcp token` and `ojogato mcp url`.
+Never paste the token into a shared file or a repo.
+
+**Claude Code, on the camera Mac (stdio):**
+
+```sh
+claude mcp add ojogato -e OJOGATO_HOME="$HOME/.ojogato" -- /usr/bin/python3 "$HOME/.ojogato/mcp/ojogato_mcp.py" --stdio
+```
+
+**Claude Code, on another machine on the tailnet (HTTP):**
+
+```sh
+claude mcp add --transport http ojogato http://<camera-mac>.<tailnet>.ts.net:8790/mcp \
+  --header "Authorization: Bearer <OJOGATO_MCP_TOKEN>"
+```
+
+**Hermes (on the VPS, over the tailnet):**
+
+```sh
+hermes mcp add ojogato --url http://<camera-mac>.<tailnet>.ts.net:8790/mcp \
+  --header "Authorization: Bearer <OJOGATO_MCP_TOKEN>"
+```
+
+(Check `hermes mcp add --help` for the exact flag names in your Hermes version. The pieces
+are the same: the `/mcp` URL and an `Authorization: Bearer` header.)
+
+**Any other MCP client.** Generic config, stdio:
+
+```json
+{ "mcpServers": { "ojogato": {
+    "command": "/usr/bin/python3",
+    "args": ["/Users/<you>/.ojogato/mcp/ojogato_mcp.py", "--stdio"],
+    "env": { "OJOGATO_HOME": "/Users/<you>/.ojogato" } } } }
+```
+
+HTTP:
+
+```json
+{ "mcpServers": { "ojogato": {
+    "type": "http",
+    "url": "http://<camera-mac>.<tailnet>.ts.net:8790/mcp",
+    "headers": { "Authorization": "Bearer <OJOGATO_MCP_TOKEN>" } } } }
+```
+
+For remote agents, set `OJOGATO_MCP_BIND="tailscale"` and
+`OJOGATO_MCP_PUBLIC_URL="http://<camera-mac>.<tailnet>.ts.net:8790"`, so media links use the
+name your phone resolves.
+
+## Waking your agent: the cron poll recipe
+
+MCP never pushes, so the agent has to look. Give it a scheduled job that runs a short turn
+every 15–30 minutes:
+
+1. Call `list_events(since_epoch=<last seen>, real_only=true)`. Use the newest `end` from the
+   previous run, kept in the agent's own memory or state file. On the first run, use now
+   minus the interval.
+2. **If `events` is empty, stay silent.** No message, no "all quiet". That's the common case.
+3. On a new sighting, call `get_event_frame(event_id)` for the newest event and message the
+   user: the pipeline's facts (time, pet/person) plus the frame. If the agent describes the
+   frame, it says that's its own observation.
+4. Store the newest `end` as the next `since_epoch`.
+
+**OpenClaw:** add a job to `~/.openclaw/cron/jobs.json` on a `*/20 * * * *` schedule, with a
+prompt like *"Call ojogato list_events with since_epoch={{last}} and real_only=true. If
+there are no events, reply with nothing. Otherwise send me the newest event's frame and
+time."*
+
+**Hermes:** create the same job with its `cronjob` tool, at the same interval with the same
+prompt.
+
+**Token cost.** Every run is a full agent turn, so the cost is runs per day × cost per run.
+Every 20 minutes is 72 runs a day. At about 2k tokens for an empty run, that's roughly 150k
+tokens a day before any sighting. Keep the prompt tiny, don't load extra skills or history
+into the job, use a small model for the poll if your agent allows it, and widen the interval
+at night if you don't need it. Safety alerts don't depend on any of this: the watchdog
+(`heartbeat.sh`) keeps texting on its own.
 
 ## Testing without the camera
 
-A fixture `OJOGATO_HOME` (fake `verdicts.tsv`, motion frames, a short test recording) runs
-every tool without a camera. End-to-end on the real camera Mac before release.
+`tests/fixture/home/` is a fake `OJOGATO_HOME`. Its `bin/` holds stub scripts that print
+exactly the contract JSON, with tiny real JPEG/mp4 files. `OJOGATO_FIXTURE_MODE` picks
+`happy`, `empty` or `error`. The send stubs (`report.sh`, `recap.sh` without `--no-send`)
+never send anything: they append a line to `$OJOGATO_FIXTURE_LOG`. Run the smoke test with:
+
+```sh
+uv run --python 3.9 python tests/mcp/smoke.py
+```
+
+It spawns the server over stdio and HTTP and exercises every tool in all three modes, plus
+the token, session, bind-refusal and signed-media checks. End-to-end on the real camera Mac
+before release.
