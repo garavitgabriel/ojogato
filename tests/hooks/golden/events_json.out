@@ -1,0 +1,6 @@
+{"start":1768460400,"end":1768460404,"frames":3,"subject_frames":1,"verdict":"pet","score":0.820,"best_epoch":1768460402,"best_frame":"20260115-070002","subject_first":1768460402,"subject_last":1768460402}
+{"start":1768467600,"end":1768467609,"frames":4,"subject_frames":0,"verdict":"none","score":0.000,"best_epoch":0,"best_frame":"","subject_first":0,"subject_last":0}
+{"start":1768471200,"end":1768471202,"frames":2,"subject_frames":2,"verdict":"person","score":0.600,"best_epoch":1768471200,"best_frame":"20260115-100000","subject_first":1768471200,"subject_last":1768471202}
+{"start":1768476000,"end":1768476008,"frames":5,"subject_frames":3,"verdict":"pet","score":0.910,"best_epoch":1768476004,"best_frame":"20260115-112004","subject_first":1768476002,"subject_last":1768476006}
+{"start":1768477800,"end":1768477802,"frames":2,"subject_frames":0,"verdict":"pending","score":0.000,"best_epoch":0,"best_frame":"","subject_first":0,"subject_last":0}
+--- exit: 0
