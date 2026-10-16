@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- MCP server (read-only) for remote agents: Streamable HTTP on OJOGATO_MCP_BIND:PORT
+     (127.0.0.1 or the tailnet IP, never 0.0.0.0), bearer token from config.env. Loaded only
+     when OJOGATO_MCP_ENABLED=1. The watchdog never depends on it: heartbeat.sh texts directly.
+     /usr/bin/python3 is the Xcode Command Line Tools interpreter (3.9+), stdlib only. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.mcp</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>@OJOGATO_HOME@/mcp/ojogato_mcp.py</string>
+    <string>--http</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OJOGATO_HOME</key><string>@OJOGATO_HOME@</string>
+    <key>HOME</key><string>@USER_HOME@</string>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>@OJOGATO_HOME@/logs/mcp-launchd.log</string>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/mcp.err</string>
+</dict>
+</plist>
