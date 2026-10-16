@@ -115,6 +115,10 @@ In stdio mode there's no HTTP listener in that process. The link points at the
 `com.ojogato.mcp` service, so it only works when that service is running. With no token
 configured, `url` is `null` and `url_error` says why.
 
+**Links point at files, not moments.** `lastmove.mp4` is rewritten every time a clip is cut,
+so a link from an hour ago plays whatever the last clip is now. Recaps get a timestamped
+filename and don't have this problem.
+
 ## Running it
 
 ```sh
@@ -160,12 +164,12 @@ claude mcp add --transport http ojogato http://<camera-mac>.<tailnet>.ts.net:879
 **Hermes (on the VPS, over the tailnet):**
 
 ```sh
-hermes mcp add ojogato --url http://<camera-mac>.<tailnet>.ts.net:8790/mcp \
-  --header "Authorization: Bearer <OJOGATO_MCP_TOKEN>"
+hermes mcp add ojogato --url http://<camera-mac>.<tailnet>.ts.net:8790/mcp --auth header
 ```
 
-(Check `hermes mcp add --help` for the exact flag names in your Hermes version. The pieces
-are the same: the `/mcp` URL and an `Authorization: Bearer` header.)
+Hermes prompts for the key: paste the output of `ojogato mcp token` on the camera Mac. It
+stores it as `MCP_OJOGATO_API_KEY` in the Hermes `.env` and sends it as
+`Authorization: Bearer …`. (Checked against Hermes Agent v0.21's `hermes mcp add --help`.)
 
 **Any other MCP client.** Generic config, stdio:
 
