@@ -35,12 +35,25 @@ FFMPEG="$OJOGATO_HOME/bin/ffmpeg"
 REC="$OJOGATO_HOME/recordings"
 LOOKBACK="${OJOGATO_CLIP_LOOKBACK_HOURS:-24}"
 
+# --json (for agents): same clip, same lastmove.meta, but print one JSON object instead of
+# the path — {"path","event_id","event_hhmm","verdict","duration_s","luma","dark"}, every
+# field null when there is nothing to show (exit 0 either way). Never sends anything; this
+# script never did. event_id is null for the unverified fallback: no verified event exists.
+JSON=0
+for a in "$@"; do [ "$a" = "--json" ] && JSON=1; done
+nothing() {
+  [ "$JSON" = "1" ] && echo '{"path":null,"event_id":null,"event_hhmm":null,"verdict":null,"duration_s":null,"luma":null,"dark":null}'
+  exit 0
+}
+EVENT_ID=""
+
 # ---------------------------------------------------------------- pick the anchor
 # VERDICT is what report.sh captions the clip with: pet, person, or unverified.
 VERDICT=""; SCORE=""; S_FIRST=""; S_LAST=""; BEST=""
 if [ "${OJOGATO_VISION_ENABLED:-1}" != "0" ] && [ -x "$BIN/events.sh" ]; then
   EV=$("$BIN/events.sh" --hours "$LOOKBACK" --last-real 2>/dev/null)
   if [ -n "$EV" ]; then
+    EVENT_ID=$(printf '%s' "$EV" | cut -f1)
     VERDICT=$(printf '%s' "$EV" | cut -f5)
     SCORE=$(printf '%s'   "$EV" | cut -f6)
     BEST=$(printf '%s'    "$EV" | cut -f7)
@@ -53,11 +66,11 @@ if [ -z "$S_FIRST" ] || [ "$S_FIRST" = "0" ]; then
   # No verified event (verifier off, still catching up, or genuinely nothing seen in
   # LOOKBACK hours). Fall back to the old burst anchor so `ojogato clip` still produces
   # something, and mark it unverified so the caption cannot overclaim.
-  VERDICT="unverified"; SCORE="0"
+  VERDICT="unverified"; SCORE="0"; EVENT_ID=""
   TIMES=$(ls -t "$OJOGATO_HOME/motionframes"/*.jpg 2>/dev/null | head -200 | while read -r f; do
     stat -f %m "$f"
   done | sort -n)
-  [ -z "$TIMES" ] && exit 0
+  [ -z "$TIMES" ] && nothing
   GAP="${OJOGATO_BURST_GAP:-4}"
   BMIN="${OJOGATO_BURST_MIN:-2}"
   B_START=""; B_END=""; C_START=""; C_END=""; C_N=0; PREV=0
@@ -119,7 +132,7 @@ for f in "$REC"/*.mp4; do
   [ -z "$first_st" ] && first_st=$st
   printf "file '%s'\n" "$f" >> "$LIST"
 done
-[ -s "$LIST" ] || exit 0
+[ -s "$LIST" ] || nothing
 
 # Offset within the first included segment; clamp if the window opens before it exists.
 OFF=$(( T0 - first_st ))
@@ -127,7 +140,7 @@ OFF=$(( T0 - first_st ))
 "$FFMPEG" -y -loglevel error -f concat -safe 0 -i "$LIST" -ss "$OFF" -t "$DUR" \
   -c copy -movflags +faststart "$OUT" 2>/dev/null
 rm -f "$LIST"
-[ -s "$OUT" ] || exit 0
+[ -s "$OUT" ] || nothing
 
 # Mean luma of the clip. With no IR the room is near-black once the lights go out
 # (~8/255 measured, vs ~43 lit), and a "here is the movement" video of a black frame
@@ -143,4 +156,15 @@ YAVG=$("$FFMPEG" -v info -i "$OUT" -vf "signalstats,metadata=print:key=lavfi.sig
   echo "CLIP_SCORE=${SCORE:-0}"
 } > "$META"
 
+if [ "$JSON" = "1" ]; then
+  . "$BIN/ojogato-json.sh"
+  # The cut is stream-copied + faststart, so the header carries the real duration.
+  DUR_S=$("$FFMPEG" -hide_banner -i "$OUT" 2>&1 | grep -oE 'Duration: [0-9]+:[0-9]{2}:[0-9.]+' | head -1 \
+    | sed 's/Duration: //' | awk -F: '{printf "%.2f", $1 * 3600 + $2 * 60 + $3}')
+  printf '{"path":%s,"event_id":%s,"event_hhmm":%s,"verdict":%s,"duration_s":%s,"luma":%s,"dark":%s}\n' \
+    "$(json_str "$OUT")" "$(json_str_or_null "$EVENT_ID")" "$(json_str "$(date -r "$E_START" '+%H:%M')")" \
+    "$(json_str "${VERDICT:-unverified}")" "$(json_num_or_null "$DUR_S")" \
+    "$(json_num_or_null "$YAVG")" "$(dark_json "$YAVG")"
+  exit 0
+fi
 echo "$OUT"

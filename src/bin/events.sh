@@ -39,7 +39,15 @@
 #   --real-only  emit only pet/person events
 #   --last-real  emit only the newest real event (nothing if there is none)
 #   --hours N    only consider frames from the last N hours (default 24)
-#   --json       emit JSON objects instead of TSV
+#   --json       emit JSON objects instead of TSV; each carries "event_id" (its start
+#                epoch, as a string), the stable handle agents pass back
+#   --since E    keep only events that ended after unix epoch E (filters; does not widen
+#                --hours). Combines with --real-only / --last-real.
+#   --event ID   just that one event, whatever its verdict; ignores --hours, so an id from
+#                an earlier listing still resolves while its frames exist. Not found:
+#                exit 3 (with --json: {"error":"no such event"} on stdout).
+#
+# With --json, a bad option is reported as {"error":"…"} on stdout (exit 2).
 #
 # Species: cat and dog collapse to "pet" here on purpose. Vision's cat/dog split is not
 # reliable at this resolution and pale animals read as "dog" in a minority of frames;
@@ -56,18 +64,44 @@ HOURS=24
 REAL_ONLY=0
 LAST_REAL=0
 JSON=0
+EVENT=""
+AFTER=""
+# Errors go to stdout as {"error":…} when the caller asked for JSON (the agent contract),
+# and to stderr as before otherwise.
+WANT_JSON=0
+for a in "$@"; do [ "$a" = "--json" ] && WANT_JSON=1; done
+fail() { # fail <exit> <message>
+  if [ "$WANT_JSON" = "1" ]; then
+    m=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g'); printf '{"error":"%s"}\n' "$m"
+  else
+    echo "events.sh: $2" >&2
+  fi
+  exit "$1"
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     --hours)     HOURS="$2"; shift 2 ;;
     --real-only) REAL_ONLY=1; shift ;;
     --last-real) LAST_REAL=1; REAL_ONLY=1; shift ;;
     --json)      JSON=1; shift ;;
-    *) echo "events.sh: unknown option $1" >&2; exit 2 ;;
+    --event)     EVENT="$2"; shift 2 ;;
+    --since)     AFTER="$2"; shift 2 ;;
+    *) fail 2 "unknown option $1" ;;
   esac
 done
+case "$AFTER" in *[!0-9]*) fail 2 "--since needs a unix epoch" ;; esac
+if [ -n "$EVENT" ]; then
+  # An event_id is its start epoch. Anything else cannot name an event.
+  case "$EVENT" in *[!0-9]*) fail 3 "no such event" ;; esac
+  REAL_ONLY=0; LAST_REAL=0; AFTER=""
+fi
 
 NOW=$(date +%s)
 SINCE=$(( NOW - HOURS * 3600 ))
+# Looking one event up ignores --hours: the window starts just before the event, GAP+1
+# seconds back, so a frame that would have chained into it (making the real start earlier)
+# is still seen — and then the id correctly fails to match.
+[ -n "$EVENT" ] && SINCE=$(( EVENT - GAP - 1 ))
 
 # Candidate frames in the window, as "<epoch> <basename>". The epoch comes from the
 # FILENAME (the detector writes %Y%m%d-%H%M%S), not from mtime: mtime is rewritten by any
@@ -118,7 +152,8 @@ list_frames() {
 # the frame list second (marked F), so every frame carries its verdict — or the empty
 # string when vision has not caught up yet, which becomes "pending".
 list_frames | awk -v gap="$GAP" -v real_only="$REAL_ONLY" -v last_real="$LAST_REAL" \
-                  -v json="$JSON" -v vfile="$VERDICTS" '
+                  -v json="$JSON" -v vfile="$VERDICTS" \
+                  -v want="${EVENT:--1}" -v after="${AFTER:--1}" '
 BEGIN {
   FS = "\t"; OFS = "\t"
   while ((getline line < vfile) > 0) {
@@ -159,16 +194,25 @@ END {
     else                verdict = "none"
 
     if (real_only && verdict != "pet" && verdict != "person") continue
+    if (want + 0 >= 0 && st[i] != want + 0) continue
+    if (after + 0 >= 0 && en[i] <= after + 0) continue
     ev[++k] = i; vv[k] = verdict
   }
   lo = 1; hi = k
   if (last_real) { lo = k; hi = k }
-  if (k == 0) exit 0
+  if (k == 0) {
+    if (want + 0 >= 0) {
+      if (json) print "{\"error\":\"no such event\"}"
+      else print "events.sh: no such event" > "/dev/stderr"
+      exit 3
+    }
+    exit 0
+  }
   for (j = lo; j <= hi; j++) {
     i = ev[j]; verdict = vv[j]
     if (json) {
-      printf "{\"start\":%d,\"end\":%d,\"frames\":%d,\"subject_frames\":%d,\"verdict\":\"%s\",\"score\":%.3f,\"best_epoch\":%d,\"best_frame\":\"%s\",\"subject_first\":%d,\"subject_last\":%d}\n", \
-        st[i], en[i], nf[i], ns[i], verdict, best[i], be[i], bb[i], sf[i], sl[i]
+      printf "{\"event_id\":\"%d\",\"start\":%d,\"end\":%d,\"frames\":%d,\"subject_frames\":%d,\"verdict\":\"%s\",\"score\":%.3f,\"best_epoch\":%d,\"best_frame\":\"%s\",\"subject_first\":%d,\"subject_last\":%d}\n", \
+        st[i], st[i], en[i], nf[i], ns[i], verdict, best[i], be[i], bb[i], sf[i], sl[i]
     } else {
       printf "%d\t%d\t%d\t%d\t%s\t%.3f\t%d\t%s\t%d\t%d\n", \
         st[i], en[i], nf[i], ns[i], verdict, best[i], be[i], bb[i], sf[i], sl[i]

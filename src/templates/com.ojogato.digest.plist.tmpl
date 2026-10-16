@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Standalone digests: 09:00 status digest, 21:00 digest with the day's recap video.
+     digest.sh does nothing unless OJOGATO_DIGEST_MODE=standalone, and stands down if
+     OpenClaw's digest crons exist, so it can never double-send next to an agent.
+     One plist, two calendar entries; digest.sh picks morning/evening from the hour.
+     No RunAtLoad: loading the job must never send a digest by itself. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.digest</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@OJOGATO_HOME@/bin/digest.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/digest.err</string>
+</dict>
+</plist>
