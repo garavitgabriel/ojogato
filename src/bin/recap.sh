@@ -133,6 +133,13 @@ FONT=""
 for f in "/System/Library/Fonts/Supplemental/Arial Bold.ttf" /System/Library/Fonts/Helvetica.ttc; do
   [ -f "$f" ] && { FONT="$f"; break; }
 done
+# Time labels need ffmpeg's drawtext filter, which needs freetype. Some ffmpeg builds
+# (current Homebrew among them) ship without it, and then every moment cut failed and the
+# recap claimed the footage had rolled off. Without drawtext the moments go out unlabelled
+# instead; the caption still lists the times.
+if [ -n "$FONT" ] && ! "$FFMPEG" -hide_banner -filters 2>/dev/null | grep -q ' drawtext '; then
+  FONT=""
+fi
 
 i=0; KEPT=0; FIRST_HM=""; LAST_HM=""; PEOPLE=0
 while IFS=$'\t' read -r st en nf ns verdict score best bframe sfirst slast; do

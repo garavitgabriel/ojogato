@@ -44,6 +44,7 @@ PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
 RECAP_TIMEOUT = 180
 SCRIPT_TIMEOUT = 30
+SEND_TIMEOUT = 60      # report.sh uploads a photo and a clip to Telegram
 MAX_BODY = 1024 * 1024
 MAX_SESSIONS = 256
 
@@ -460,7 +461,7 @@ def tool_get_last_clip(cfg, args):
     if deliver == "url":
         _attach_url(cfg, facts, clip["path"])
     else:
-        facts["telegram"] = run_text(cfg, "report.sh", ["now"])
+        facts["telegram"] = run_text(cfg, "report.sh", ["now"], timeout=SEND_TIMEOUT)
         facts["delivered"] = "telegram"
     return _with_image(facts, image, sheet_err)
 
