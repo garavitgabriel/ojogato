@@ -32,7 +32,7 @@ Every count, every "last seen" time, every clip and every recap is built from th
 
 - **Ask and see.** Ask "how are the cats?" and you get a live snapshot, activity stats ("last seen 4 min ago, 6 sightings in 6h"), a link to the live view, and a ~9-second clip of the last time something was actually recognised.
 - **A daily recap video.** `ojogato recap` picks the day's best moments (up to 8, spread across the day), puts a time label on each, and joins them into one short video. It only uses moments where a subject was recognised. The 9pm digest sends it automatically.
-- **Twice-daily digests** at 9am and 9pm, scheduled by your agent.
+- **Twice-daily digests** at 9am and 9pm (the evening one is the recap), with or without an agent.
 - **A watchdog that runs separately from everything else.** It's plain launchd plus `curl`, outside the agent and the pipeline. If the stream dies, recording stalls, the disk runs low, the detector freezes, or the room is too quiet during the day, it messages you directly. It limits how often it messages, so a broken setup doesn't spam you.
 - **Live view from your phone** over WebRTC or HLS, reachable only on your Tailscale network.
 - **Rolling recordings** in 10-minute segments, kept for 48 hours or up to 9 GB by default, so you can answer "what happened around 3pm?".
@@ -42,9 +42,9 @@ Every count, every "last seen" time, every clip and every recap is built from th
 
 The monitoring doesn't depend on any AI model. Agents only change how you talk to it.
 
-- **Standalone:** watchdog alerts reach you on Telegram with no agent at all, and `ojogato report` / `ojogato recap` send a report or recap from the command line. Asking questions in chat needs an agent.
+- **Standalone:** watchdog alerts and the 9am/9pm digests reach you on Telegram with no agent at all, and `ojogato report` / `ojogato recap` send one on demand. Asking questions in chat needs an agent.
 - **[OpenClaw](https://openclaw.ai):** run `openclaw/register.sh` and just ask your agent. It runs the same report scripts and relays what they found in its own voice. → [OpenClaw integration](docs/openclaw-integration.md)
-- **Any MCP-capable agent:** *in progress.* An MCP server (the standard way AI agents connect to tools) so Hermes, Claude Code, Codex and others can query the camera, including an agent on a server reaching a camera at home over Tailscale.
+- **Any MCP-capable agent** (Hermes, Claude Code, Codex, …): turn on the built-in MCP server and the agent gets six read-only tools. It gets facts as JSON, the snapshot and the best frame of each sighting as images it can look at, and clips and recaps as private tailnet links. An agent on a VPS can reach a camera at home over Tailscale, and a cron on the agent's side can check for new sightings on a schedule. → [MCP server](docs/mcp-server.md)
 
 The rule for every agent is the same: **the agent words the answer, but the facts come from the recognition pipeline.** It never claims to see something the recognition didn't confirm.
 
@@ -136,7 +136,8 @@ The LLM only adds voice, and it's optional.
 - [Why headless camera access fails on macOS (and the fix)](docs/tcc-camera-permission.md): a deep dive on macOS camera permissions (TCC).
 - [Privacy and networking](docs/privacy-and-networking.md): Tailscale first, no cloud, no accounts.
 - [OpenClaw integration](docs/openclaw-integration.md): what `register.sh` sets up and what using it with the agent is like.
-- [Roadmap](docs/roadmap.md): MCP server, Linux/VPS, multiple cameras, masking zones.
+- [MCP server](docs/mcp-server.md): tools, connecting Claude Code / Hermes, the cron-poll recipe, security.
+- [Roadmap](docs/roadmap.md): Linux/VPS, multiple cameras, masking zones.
 - [Changelog](CHANGELOG.md)
 
 ## License

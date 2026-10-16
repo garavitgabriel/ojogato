@@ -4,6 +4,37 @@ All notable changes to Ojo de Gato are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — unreleased
+
+Any MCP-capable agent can now use Ojo de Gato, not only OpenClaw, and digests no longer
+need an agent at all.
+
+### Added
+- **MCP server** (`src/mcp/ojogato_mcp.py`): stdlib Python 3.9+, stdio for a local agent and
+  Streamable HTTP for a remote one (for example an agent on a VPS reaching the camera Mac over
+  Tailscale). Six read-only tools: `camera_status`, `list_events`, `get_snapshot`,
+  `get_event_frame`, `get_last_clip`, `get_recap`. Facts come back as JSON from the pipeline.
+  The snapshot and the frame Apple Vision was most confident about come back as images the
+  agent can look at. Clips and recaps come back as signed links on your tailnet, or go straight
+  to Telegram. Bearer token required, it refuses to bind `0.0.0.0`, and no tool can turn the
+  camera off. Off by default (`OJOGATO_MCP_ENABLED=1`, `ojogato mcp status|token|url`). See
+  [docs/mcp-server.md](docs/mcp-server.md), including the cron-poll recipe for having an
+  agent check for new sightings on a schedule.
+- **Standalone digests** (`com.ojogato.digest`): 09:00 report and 21:00 recap without an
+  agent. `OJOGATO_DIGEST_MODE=standalone|agent|off`; install picks `agent` when OpenClaw is
+  present so digests are never sent twice.
+- Machine-readable pipeline output for agents: `status.sh --json`, `snapshot.sh`,
+  `contact-sheet.sh`, `events.sh --json` with `event_id`, `--event ID` and `--since EPOCH`,
+  `clip.sh --json`, `recap.sh --no-send --json`. Default (human) output of every existing
+  script is unchanged.
+- Test suites: `tests/hooks/run.sh` (pipeline contract + golden default outputs) and
+  `tests/mcp/smoke.py` (protocol, tools, auth, media signing), both runnable without a camera.
+
+### Fixed
+- `recap` failed every moment cut on ffmpeg builds without the `drawtext` filter (current
+  Homebrew among them) and wrongly said the footage had rolled off. Moments now go out
+  unlabelled instead.
+
 ## [0.3.0] — 2026-09-24
 
 ### Added
