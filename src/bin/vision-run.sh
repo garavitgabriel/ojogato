@@ -80,6 +80,6 @@ while :; do
 
   # Liveness, same idea as the detector's: a verifier that is wedged and a night with no
   # cats both leave the event list empty, and only this file tells them apart.
-  date +%s > "$ALIVE"
+  date +%s > "$ALIVE.tmp" && mv -f "$ALIVE.tmp" "$ALIVE"  # atomic: readers never see it empty
   sleep "$INTERVAL"
 done

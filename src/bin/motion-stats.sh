@@ -43,7 +43,8 @@ VISION_STATE="off"
 if [ "${OJOGATO_VISION_ENABLED:-1}" != "0" ] && [ -x "$BIN/events.sh" ]; then
   ALIVE="$OJOGATO_HOME/vision/verifier-alive"
   STALE_SEC="${OJOGATO_VISION_STALL_SEC:-300}"
-  if [ -s "$ALIVE" ] && [ $(( NOW - $(cat "$ALIVE" 2>/dev/null || echo 0) )) -le "$STALE_SEC" ]; then
+  ALIVE_AT=$({ tr -cd '0-9' < "$ALIVE"; } 2>/dev/null)
+  if [ -n "$ALIVE_AT" ] && [ $(( NOW - ALIVE_AT )) -le "$STALE_SEC" ]; then
     VISION_STATE="on"
   else
     VISION_STATE="stale"
