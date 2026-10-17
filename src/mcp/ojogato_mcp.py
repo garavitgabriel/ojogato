@@ -359,6 +359,7 @@ def text_block(obj):
 
 
 INLINE_MAX_BYTES = 45 * 1024 * 1024   # Telegram bots upload up to 50 MB
+TOOLS_TTL_MS = 3600 * 1000
 
 
 def video_resource_block(cfg, path):
@@ -732,7 +733,10 @@ def handle_request(cfg, method, params):
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": [{k: v for k, v in t.items() if k != "handler"} for t in TOOLS]}
+        # ttlMs (SEP-2549): clients that cache the tool list re-read it within the hour, so an
+        # upgrade's new tool options reach them without a manual cache flush.
+        return {"tools": [{k: v for k, v in t.items() if k != "handler"} for t in TOOLS],
+                "ttlMs": TOOLS_TTL_MS}
     if method == "tools/call":
         if not isinstance(params, dict) or not isinstance(params.get("name"), str):
             raise RpcError(-32602, "tools/call needs a tool name")
