@@ -465,7 +465,26 @@ def tool_get_snapshot(cfg, args):
     snap = run_json(cfg, "snapshot.sh", ["--max-width", str(width)])
     image = image_block(cfg, snap.get("path"))
     snap["source"] = "camera (live frame)"
+    _attach_url(cfg, snap, snap.get("path"))
     return _with_image(snap, image)
+
+
+def _linkable_copy(cfg, path, event_id):
+    """Event frames live in motionframes/, which /media never serves: copy the one frame into
+    frames/ so it can be signed, and drop copies older than the link lifetime."""
+    os.makedirs(cfg.frames, exist_ok=True)
+    cutoff = time.time() - max(cfg.media_ttl, 60)
+    for name in os.listdir(cfg.frames):
+        if name.startswith("event-") and name.endswith(".jpg"):
+            old = os.path.join(cfg.frames, name)
+            try:
+                if os.path.getmtime(old) < cutoff:
+                    os.remove(old)
+            except OSError:
+                pass
+    dst = os.path.join(cfg.frames, "event-%s.jpg" % event_id)
+    shutil.copyfile(path, dst)
+    return dst
 
 
 def tool_get_event_frame(cfg, args):
@@ -483,7 +502,12 @@ def tool_get_event_frame(cfg, args):
     if not os.path.isfile(path) and not os.path.splitext(path)[1]:
         path += ".jpg"
     facts["frame"] = "the event's most confident Vision frame"
-    return _with_image(facts, image_block(cfg, path))
+    image = image_block(cfg, path)
+    try:
+        _attach_url(cfg, facts, _linkable_copy(cfg, path, event_id))
+    except OSError as e:
+        facts["url"], facts["url_expires_at"], facts["url_error"] = None, None, str(e)
+    return _with_image(facts, image)
 
 
 def tool_get_last_clip(cfg, args):
@@ -570,7 +594,8 @@ TOOLS = [
         "name": "get_snapshot",
         "title": "Live snapshot",
         "description": "One live frame from the camera as a JPEG image, plus JSON with taken_at, "
-                       "luma and dark. The image is for you to look at; " + HONESTY,
+                       "luma, dark and a signed url of the same JPEG. The image is for you to look "
+                       "at; download the url if you want to send the photo to the human. " + HONESTY,
         "inputSchema": {
             "type": "object",
             "properties": {"max_width": {"type": "integer", "minimum": 64, "maximum": 1920,
@@ -584,8 +609,8 @@ TOOLS = [
         "name": "get_event_frame",
         "title": "Event frame",
         "description": "The frame Apple Vision was most confident in for one event, as a JPEG "
-                       "image, plus the event's verdict and score. event_id comes from "
-                       "list_events. " + HONESTY,
+                       "image, plus the event's verdict, score and a signed url of the frame to "
+                       "send on. event_id comes from list_events. " + HONESTY,
         "inputSchema": {
             "type": "object",
             "properties": {"event_id": {"type": "string", "pattern": "^[0-9]+$",

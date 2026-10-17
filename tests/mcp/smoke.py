@@ -283,11 +283,24 @@ def happy(c, expect_url_fetch):
     check(len(images(r)) == 1, "get_snapshot returns one image")
     snap = facts(r)
     check(snap["dark"] is False and "taken_at" in snap and "image_note" in snap, "snapshot facts")
+    check(snap.get("url") and snap["url_expires_at"] > time.time(), "get_snapshot signed url")
+    if expect_url_fetch:
+        code, h, body = get(snap["url"])
+        check(code == 200 and h.get("Content-Type") == "image/jpeg" and body[:2] == b"\xff\xd8",
+              "snapshot url serves the JPEG")
 
     r = call(c, "get_event_frame", event_id=ev["events"][0]["event_id"])
     ok(r, "get_event_frame")
     check(len(images(r)) == 1, "get_event_frame returns one image")
     check(facts(r)["event"]["verdict"] == "pet", "get_event_frame verdict")
+    ef = facts(r)
+    check(ef.get("url") and "/event-" in ef["url"], "get_event_frame signed url of a frames/ copy")
+    if expect_url_fetch:
+        code, h, body = get(ef["url"])
+        check(code == 200 and body == images(r)[0], "event frame url serves the same JPEG the agent saw")
+    for name in os.listdir(os.path.join(FIXTURE, "frames")):
+        if name.startswith("event-"):
+            os.remove(os.path.join(FIXTURE, "frames", name))
     none_ev = [e for e in allev["events"] if e["verdict"] == "none"][0]
     r = call(c, "get_event_frame", event_id=none_ev["event_id"])
     ok(r, "get_event_frame on a noise event")

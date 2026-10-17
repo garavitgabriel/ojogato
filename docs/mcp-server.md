@@ -31,8 +31,8 @@ tool descriptions say it must be labelled as one.
 |---|---|---|
 | `camera_status` | — | JSON: `last_seen_min`, `sightings_6h`, `sightings_12h`, `vision` (on/stale/off), `dark`, `paused`, `detector_alive`, `live_url` |
 | `list_events` | `hours=6`, `real_only=true`, `since_epoch?` | JSON list from `events.sh --json`: start, end, verdict (pet/person/none), score, frame counts, `event_id` |
-| `get_snapshot` | `max_width=768` | image (live frame) + JSON caption (`taken_at`, `luma`, `dark`) |
-| `get_event_frame` | `event_id` | image (the event's best Vision frame) + verdict/score |
+| `get_snapshot` | `max_width=768` | image (live frame) + JSON caption (`taken_at`, `luma`, `dark`, signed `url` of the JPEG) |
+| `get_event_frame` | `event_id` | image (the event's best Vision frame) + verdict/score + signed `url` |
 | `get_last_clip` | `deliver="url"\|"telegram"` | JSON (event time, verdict, duration, `url` if deliver=url) + a 3-frame contact-sheet image |
 | `get_recap` | `hours?`, `max?`, `deliver="url"\|"telegram"` | JSON (moments, times, `url`) + a contact-sheet image |
 
@@ -87,7 +87,7 @@ becomes an MCP tool error (`isError: true`) carrying the script's message (for e
 | `camera_status` | `status.sh --json` |
 | `list_events` | `events.sh --json --hours N [--real-only] [--since E]` (the window widens to reach `since_epoch`, up to 168 h) |
 | `get_snapshot` | `snapshot.sh --max-width N` |
-| `get_event_frame` | `events.sh --event ID --json`, then the event's `best_frame` from `motionframes/` |
+| `get_event_frame` | `events.sh --event ID --json`, then the event's `best_frame` from `motionframes/`, copied to `frames/event-<id>.jpg` so it can be linked |
 | `get_last_clip` | `clip.sh --json` + `contact-sheet.sh`; `deliver="telegram"` also runs `report.sh now` |
 | `get_recap` | `recap.sh --no-send --json` + `contact-sheet.sh`; `deliver="telegram"` runs `recap.sh` (its own send path) and returns the caption only, so the slow build isn't done twice |
 

@@ -14,3 +14,6 @@ motionframes/
 
 # Python
 __pycache__/
+
+# MCP copies of event frames (linked for 1h)
+frames/event-*.jpg
