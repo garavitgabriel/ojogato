@@ -427,6 +427,11 @@ def refusals():
             check(True, "resolve_bind rejects %r" % bind)
     check(mcp.resolve_bind("127.0.0.1") == "127.0.0.1", "resolve_bind 127.0.0.1")
     check(mcp.resolve_bind("localhost") == "127.0.0.1", "resolve_bind localhost")
+    # Under launchd the Tailscale app binary can print a GUI error and still exit 0.
+    check(mcp._first_tailnet_v4("The Tailscale GUI failed to start: ...") is None,
+          "tailnet ip ignores GUI error text")
+    check(mcp._first_tailnet_v4("192.168.1.4\n100.64.0.7\n") == "100.64.0.7",
+          "tailnet ip picks the 100.64.0.0/10 address")
 
 
 def stdio_without_token():

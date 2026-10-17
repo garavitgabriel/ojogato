@@ -135,25 +135,61 @@ def _tailscale_binary():
     return None
 
 
+TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _first_tailnet_v4(text):
+    for tok in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text or ""):
+        try:
+            ip = ipaddress.ip_address(tok)
+        except ValueError:
+            continue
+        if ip in TAILNET_V4:
+            return str(ip)
+    return None
+
+
+def _tailscale_ipv4():
+    """The Mac's tailnet IPv4. Under launchd the Tailscale app binary can act as the GUI
+    ("The Tailscale GUI failed to start…") and still exit 0, so only a real 100.64.0.0/10
+    address counts, and the interface list is the fallback."""
+    tried = []
+    ts = _tailscale_binary()
+    if ts:
+        try:
+            out = subprocess.run([ts, "ip", "-4"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 timeout=10, universal_newlines=True)
+            ip = _first_tailnet_v4(out.stdout)
+            if ip:
+                return ip
+            said = (out.stdout.strip() or out.stderr.strip())[:80]
+            tried.append("tailscale ip -4 said %r" % said)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            tried.append("tailscale ip -4 failed: %s" % e)
+    else:
+        tried.append("tailscale CLI not found")
+    try:
+        out = subprocess.run(["/sbin/ifconfig"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=10, universal_newlines=True)
+        ip = _first_tailnet_v4(" ".join(re.findall(r"\binet (\S+)", out.stdout)))
+        if ip:
+            return ip
+        tried.append("no 100.64.0.0/10 address on any interface")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        tried.append("ifconfig failed: %s" % e)
+    raise ValueError("OJOGATO_MCP_BIND=tailscale but no tailnet address was found "
+                     "(is Tailscale up?): " + "; ".join(tried))
+
+
 def resolve_bind(bind):
     """127.0.0.1 | tailscale | an explicit IP. Never a wildcard address."""
     b = (bind or "").strip()
     if b.lower() == "localhost":
         b = "127.0.0.1"
     if b.lower() == "tailscale":
-        ts = _tailscale_binary()
-        if not ts:
-            raise ValueError("OJOGATO_MCP_BIND=tailscale but the tailscale CLI was not found")
-        try:
-            out = subprocess.run([ts, "ip", "-4"], stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=10, universal_newlines=True)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            raise ValueError("tailscale ip -4 failed: %s" % e)
-        lines = [l.strip() for l in out.stdout.splitlines() if l.strip()]
-        if out.returncode != 0 or not lines:
-            raise ValueError("tailscale ip -4 returned no address (is Tailscale up?)")
-        b = lines[0]
+        b = _tailscale_ipv4()
     try:
         ip = ipaddress.ip_address(b)
     except ValueError:
