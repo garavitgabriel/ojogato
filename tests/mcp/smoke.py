@@ -322,6 +322,14 @@ def happy(c, expect_url_fetch):
         with open(os.path.join(FIXTURE, "frames", "lastmove.mp4"), "rb") as fh:
             check(body == fh.read(), "clip url serves the clip bytes")
     check(read_log() == "", "deliver=url sends nothing")
+    r = call(c, "get_last_clip", deliver="inline")
+    ok(r, "get_last_clip inline")
+    res = [b for b in r["content"] if b["type"] == "resource"]
+    check(len(res) == 1 and res[0]["resource"]["mimeType"] == "video/mp4", "inline: one mp4 resource")
+    with open(os.path.join(FIXTURE, "frames", "lastmove.mp4"), "rb") as fh:
+        check(base64.b64decode(res[0]["resource"]["blob"]) == fh.read(), "inline blob is the clip bytes")
+    check(facts(r)["delivered"] == "inline" and facts(r)["url"], "inline keeps the url too")
+    check(read_log() == "", "deliver=inline sends nothing")
     r = call(c, "get_last_clip", deliver="telegram")
     ok(r, "get_last_clip telegram")
     check(facts(r)["delivered"] == "telegram", "get_last_clip telegram delivered")
@@ -338,6 +346,10 @@ def happy(c, expect_url_fetch):
         code, h, body = get(rc["url"], {"Range": "bytes=0-9"})
         check(code == 206 and len(body) == 10 and h.get("Content-Range", "").startswith("bytes 0-9/"),
               "recap url honours Range (206)")
+    r = call(c, "get_recap", hours=6, deliver="inline")
+    ok(r, "get_recap inline")
+    check([b["resource"]["mimeType"] for b in r["content"] if b["type"] == "resource"] == ["video/mp4"],
+          "get_recap inline returns the mp4")
     r = call(c, "get_recap", deliver="telegram", hours=3)
     ok(r, "get_recap telegram")
     check("recap.sh --hours 3" in read_log(), "deliver=telegram shells out to recap.sh (send path)")

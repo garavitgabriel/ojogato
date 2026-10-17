@@ -19,7 +19,7 @@ gives the agent three kinds of output, and each one is labelled with where it ca
 |---|---|---|
 | Facts: last seen, sightings, verified events, vision state, darkness | JSON text | the deterministic pipeline (`events.sh`, `motion-stats.sh`) |
 | Pictures the agent can look at: live snapshot, an event's best frame, a contact sheet of a clip | `image` blocks (JPEG, downscaled) | the camera, with the frame Apple Vision was most confident in |
-| Video for the human: last-movement clip, day recap | **not sent through MCP**: a URL served by the MCP server over the tailnet, or delivered straight to Telegram by ojogato | `clip.sh` / `recap.sh` |
+| Video for the human: last-movement clip, day recap | a URL served by the MCP server over the tailnet; or, with `deliver="inline"`, the mp4 itself as an embedded `resource` block; or delivered straight to Telegram by ojogato | `clip.sh` / `recap.sh` |
 
 The honesty rule survives the change. Counts and "was there a cat" always come from the
 pipeline. If the agent describes an image, that description is its own observation, and the
@@ -33,16 +33,18 @@ tool descriptions say it must be labelled as one.
 | `list_events` | `hours=6`, `real_only=true`, `since_epoch?` | JSON list from `events.sh --json`: start, end, verdict (pet/person/none), score, frame counts, `event_id` |
 | `get_snapshot` | `max_width=768` | image (live frame) + JSON caption (`taken_at`, `luma`, `dark`, signed `url` of the JPEG) |
 | `get_event_frame` | `event_id` | image (the event's best Vision frame) + verdict/score + signed `url` |
-| `get_last_clip` | `deliver="url"\|"telegram"` | JSON (event time, verdict, duration, `url` if deliver=url) + a 3-frame contact-sheet image |
-| `get_recap` | `hours?`, `max?`, `deliver="url"\|"telegram"` | JSON (moments, times, `url`) + a contact-sheet image |
+| `get_last_clip` | `deliver="url"\|"inline"\|"telegram"` | JSON (event time, verdict, duration, `url` if deliver=url) + a 3-frame contact-sheet image |
+| `get_recap` | `hours?`, `max?`, `deliver="url"\|"inline"\|"telegram"` | JSON (moments, times, `url`) + a contact-sheet image |
 
 Not exposed in v1: `on`/`off`, config, setup. A monitoring tool that an agent can switch off
 would weaken the watchdog's guarantee.
 
-`deliver="url"` is the v1 path for remote agents: your phone is on the tailnet, so the agent
-relays the link and you tap it. (Later, an agent could fetch the mp4 and send it through its
-own bot.) `deliver="telegram"`
-keeps today's behaviour (the scripts send with ojogato's bot).
+`deliver="url"` is the default: your phone is on the tailnet, so the agent relays the link
+and you tap it. `deliver="inline"` also returns the mp4 itself (up to 45 MB) as an embedded
+resource, so an agent that can attach files sends the video into its own chat. Hermes does
+this out of the box: it saves the resource and the agent replies with `MEDIA:<path>`. Image
+blocks work the same way for the snapshot. `deliver="telegram"` keeps the older behaviour
+(the scripts send with ojogato's bot).
 
 ## Alerts: MCP is pull, not push
 

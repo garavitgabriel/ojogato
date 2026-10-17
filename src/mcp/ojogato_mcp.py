@@ -358,6 +358,25 @@ def text_block(obj):
     return {"type": "text", "text": json.dumps(obj, ensure_ascii=False, sort_keys=False)}
 
 
+INLINE_MAX_BYTES = 45 * 1024 * 1024   # Telegram bots upload up to 50 MB
+
+
+def video_resource_block(cfg, path):
+    """The video itself as an MCP embedded resource, for agents that forward files."""
+    real = _inside(cfg.home, path) if path else None
+    if not real or not os.path.isfile(real):
+        raise ToolError("video file missing: %s" % path)
+    size = os.path.getsize(real)
+    if size > INLINE_MAX_BYTES:
+        raise ToolError("video is %d MB, too big to send inline: use deliver=\"url\""
+                        % (size // (1024 * 1024)))
+    with open(real, "rb") as fh:
+        data = fh.read()
+    return {"type": "resource", "resource": {
+        "uri": "ojogato://video/%s" % os.path.basename(real), "mimeType": "video/mp4",
+        "blob": base64.b64encode(data).decode("ascii")}}
+
+
 def image_block(cfg, path):
     real = _inside(cfg.home, path) if path else None
     if not real or not os.path.isfile(real):
@@ -390,8 +409,8 @@ def _bool_arg(args, key, default):
 
 def _deliver_arg(args):
     val = args.get("deliver", "url")
-    if val not in ("url", "telegram"):
-        raise ToolError('deliver must be "url" or "telegram"')
+    if val not in ("url", "inline", "telegram"):
+        raise ToolError('deliver must be "url", "inline" or "telegram"')
     return val
 
 
@@ -420,6 +439,21 @@ def _attach_url(cfg, facts, path):
     except ToolError as e:
         facts["url"], facts["url_expires_at"] = None, None
         facts["url_error"] = str(e)
+
+
+def _with_video(cfg, deliver, facts, path, blocks):
+    """deliver=inline appends the video file; if it can't, the url still stands."""
+    if deliver != "inline":
+        return blocks
+    try:
+        video = video_resource_block(cfg, path)
+    except ToolError as e:
+        facts["inline_error"] = str(e)
+        blocks[0] = text_block(facts)
+        return blocks
+    facts["delivered"] = "inline"
+    blocks[0] = text_block(facts)
+    return blocks + [video]
 
 
 def _with_image(facts, image, sheet_error=None):
@@ -518,12 +552,12 @@ def tool_get_last_clip(cfg, args):
         facts["note"] = "no verified movement to show"
         return [text_block(facts)]
     image, sheet_err = _contact_sheet(cfg, clip["path"])
-    if deliver == "url":
-        _attach_url(cfg, facts, clip["path"])
-    else:
+    if deliver == "telegram":
         facts["telegram"] = run_text(cfg, "report.sh", ["now"], timeout=SEND_TIMEOUT)
         facts["delivered"] = "telegram"
-    return _with_image(facts, image, sheet_err)
+        return _with_image(facts, image, sheet_err)
+    _attach_url(cfg, facts, clip["path"])
+    return _with_video(cfg, deliver, facts, clip["path"], _with_image(facts, image, sheet_err))
 
 
 def tool_get_recap(cfg, args):
@@ -548,12 +582,14 @@ def tool_get_recap(cfg, args):
         return [text_block(facts)]
     image, sheet_err = _contact_sheet(cfg, recap["path"])
     _attach_url(cfg, facts, recap["path"])
-    return _with_image(facts, image, sheet_err)
+    return _with_video(cfg, deliver, facts, recap["path"], _with_image(facts, image, sheet_err))
 
 
 _RO = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
-_DELIVER = {"type": "string", "enum": ["url", "telegram"], "default": "url",
+_DELIVER = {"type": "string", "enum": ["url", "inline", "telegram"], "default": "url",
             "description": "url: return a signed tailnet link for the human to tap. "
+                           "inline: also return the mp4 itself as an embedded resource, for "
+                           "agents that can attach files to their own chat (up to 45 MB). "
                            "telegram: ojogato's own bot sends the video to the configured chat."}
 
 TOOLS = [
@@ -627,7 +663,8 @@ TOOLS = [
         "description": "Cuts the clip of the last verified movement. Returns JSON (event time, "
                        "verdict, duration, and a signed url when deliver=url) and a 3-frame "
                        "contact-sheet image of the clip. You can't watch the video: relay the url "
-                       "to the human, or use deliver=telegram to have ojogato send it. " + HONESTY,
+                       "to the human, use deliver=inline to get the mp4 to attach yourself, or "
+                       "deliver=telegram to have ojogato send it. " + HONESTY,
         "inputSchema": {"type": "object", "properties": {"deliver": _DELIVER},
                         "additionalProperties": False},
         "annotations": dict(_RO, idempotentHint=False, title="Last movement clip"),
@@ -638,7 +675,8 @@ TOOLS = [
         "title": "Day recap",
         "description": "Builds the recap video of the day's verified moments (or the last N hours). "
                        "deliver=url returns JSON (moments with times and verdicts, a signed url) "
-                       "and a contact-sheet image; deliver=telegram has ojogato send the video and "
+                       "and a contact-sheet image; deliver=inline adds the mp4 itself; "
+                       "deliver=telegram has ojogato send the video and "
                        "returns its caption. Can take up to 3 minutes. " + HONESTY,
         "inputSchema": {
             "type": "object",
