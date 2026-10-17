@@ -44,7 +44,7 @@ The monitoring doesn't depend on any AI model. Agents only change how you talk t
 
 - **Standalone:** watchdog alerts and the 9am/9pm digests reach you on Telegram with no agent at all, and `ojogato report` / `ojogato recap` send one on demand. Asking questions in chat needs an agent.
 - **[OpenClaw](https://openclaw.ai):** run `openclaw/register.sh` and just ask your agent. It runs the same report scripts and relays what they found in its own voice. → [OpenClaw integration](docs/openclaw-integration.md)
-- **Any MCP-capable agent** (Hermes, Claude Code, Codex, …): turn on the built-in MCP server and the agent gets six read-only tools. It gets facts as JSON, the snapshot and the best frame of each sighting as images it can look at, and clips and recaps as private tailnet links. An agent on a VPS can reach a camera at home over Tailscale, and a cron on the agent's side can check for new sightings on a schedule. → [MCP server](docs/mcp-server.md)
+- **Any MCP-capable agent** (Hermes, Claude Code, Codex, …): turn on the built-in MCP server and the agent gets six read-only tools. It gets facts as JSON, the snapshot and the best frame of each sighting as images it can look at, and clips and recaps either as private tailnet links or as the video file itself, so the agent posts it right in its own chat. An agent on a VPS can reach a camera at home over Tailscale and run the 9am/9pm digests on its own schedule; they go quiet when you close the lid. → [MCP server](docs/mcp-server.md) · ready-made [Hermes skill](examples/hermes/ojogato-cats/SKILL.md)
 
 The rule for every agent is the same: **the agent words the answer, but the facts come from the recognition pipeline.** It never claims to see something the recognition didn't confirm.
 
@@ -103,6 +103,10 @@ Then run `ojogato report` to get your first snapshot on Telegram. With OpenClaw,
                    v
        Telegram  (directly, or via your agent)
 
+  MCP server (ojogato_mcp.py, :8790, tailnet-only, read-only tools):
+  the same facts, photos and videos for any MCP agent, local or on a VPS.
+  lid-watch.sh: lid closed -> paused, lid open -> resumed.
+
   heartbeat.sh: deliberately OUTSIDE everything above.
   Plain launchd + curl. It alerts you when the stack breaks
   or the room goes too quiet.
@@ -136,7 +140,8 @@ The LLM only adds voice, and it's optional.
 - [Why headless camera access fails on macOS (and the fix)](docs/tcc-camera-permission.md): a deep dive on macOS camera permissions (TCC).
 - [Privacy and networking](docs/privacy-and-networking.md): Tailscale first, no cloud, no accounts.
 - [OpenClaw integration](docs/openclaw-integration.md): what `register.sh` sets up and what using it with the agent is like.
-- [MCP server](docs/mcp-server.md): tools, connecting Claude Code / Hermes, the cron-poll recipe, security.
+- [MCP server](docs/mcp-server.md): tools, connecting Claude Code / Hermes, scheduled digests, the cron-poll recipe, security.
+- [Hermes skill](examples/hermes/ojogato-cats/SKILL.md): drop-in skill so a Hermes agent answers about the pets and sends the digests.
 - [Roadmap](docs/roadmap.md): Linux/VPS, multiple cameras, masking zones.
 - [Changelog](CHANGELOG.md)
 

@@ -1,11 +1,12 @@
 # MCP server (v0.4.0)
 
-> Status: **built (v0.4.0), not yet tested on a real camera.** It passes its smoke test
-> (`tests/mcp/smoke.py`) against a fixture `OJOGATO_HOME` on Python 3.9 and 3.14, and a live
-> Claude Code client listed its tools and viewed an image from it. End-to-end on the camera
-> Mac comes before release. Goal: any MCP-capable agent (Hermes, Claude Code, Codex) can use
-> Ojo de Gato, including an agent on a remote server reaching a camera Mac at home over
-> Tailscale.
+> Status: **built and tested end to end (v0.4.0).** It passes its smoke test
+> (`tests/mcp/smoke.py`) against a fixture `OJOGATO_HOME` on Python 3.9 and 3.14. On a real
+> camera Mac, a Hermes agent on a VPS reached it over Tailscale, answered "how are the cats?"
+> with the live photo, sent the day recap video into its own Telegram chat, and ran the
+> 9am/9pm digests (silent while paused, one notice when the Mac is unreachable). Any
+> MCP-capable agent (Hermes, Claude Code, Codex) can use Ojo de Gato, including an agent on a
+> remote server reaching a camera Mac at home over Tailscale.
 >
 > Code: `src/mcp/ojogato_mcp.py` (installed to `~/.ojogato/mcp/`). Service:
 > `com.ojogato.mcp` (HTTP mode), loaded only when `OJOGATO_MCP_ENABLED=1`.
@@ -173,6 +174,12 @@ Hermes prompts for the key: paste the output of `ojogato mcp token` on the camer
 stores it as `MCP_OJOGATO_API_KEY` in the Hermes `.env` and sends it as
 `Authorization: Bearer …`. (Checked against Hermes Agent v0.21's `hermes mcp add --help`.)
 
+Then copy the ready-made skill [`examples/hermes/ojogato-cats`](../examples/hermes/ojogato-cats/SKILL.md)
+into the Hermes skills folder (for example `skills/smart-home/ojogato-cats/`). It tells the
+agent which tool to call for each question, how to attach the photo and videos in its own chat
+(`MEDIA:` lines, `deliver="inline"`), and how to run the scheduled digests below. Send
+`/reload-mcp` in the chat once so a running session picks up the new tools.
+
 **Any other MCP client.** Generic config, stdio:
 
 ```json
@@ -216,6 +223,14 @@ time."*
 
 **Hermes:** create the same job with its `cronjob` tool, at the same interval with the same
 prompt.
+
+**Scheduled digests instead of polling (what the Hermes example does).** Two daily jobs, no
+poll: `hermes cron create "0 14 * * *" "Ojo de Gato morning digest" --skill ojogato-cats
+--deliver telegram:<chat>` and the same at 9pm for the evening recap (schedules are UTC
+unless Hermes has a timezone set). The skill makes each run check `camera_status` first: while
+the camera is paused (lid closed or `ojogato off`) the job replies `[SILENT]` and nothing is
+sent, so closing the lid quiets the agent too, with no jobs to stop. If the Mac can't be
+reached, it sends one notice and stays silent until it's back.
 
 **Token cost.** Every run is a full agent turn, so the cost is runs per day × cost per run.
 Every 20 minutes is 72 runs a day. At about 2k tokens for an empty run, that's roughly 150k
