@@ -27,6 +27,15 @@ need an agent at all.
   `contact-sheet.sh`, `events.sh --json` with `event_id`, `--event ID` and `--since EPOCH`,
   `clip.sh --json`, `recap.sh --no-send --json`. Default (human) output of every existing
   script is unchanged.
+- **The lid is the switch** (`com.ojogato.lid`): on a MacBook, closing the lid pauses
+  everything and opening it resumes. A manual `ojogato off` stays off until `ojogato on`.
+  `OJOGATO_LID_SWITCH=0` turns it off.
+- **Media into the agent's own chat:** `get_snapshot` and `get_event_frame` also return a
+  signed link, and `get_last_clip` / `get_recap` take `deliver="inline"` to return the mp4
+  itself as an embedded resource. Hermes attaches both to its replies out of the box.
+- **Hermes example skill** (`examples/hermes/ojogato-cats/`): answers about the pets with the
+  photo and videos attached, and runs 9am/9pm digests that go silent while the camera is
+  paused and say once when the camera Mac can't be reached.
 - Test suites: `tests/hooks/run.sh` (pipeline contract + golden default outputs) and
   `tests/mcp/smoke.py` (protocol, tools, auth, media signing), both runnable without a camera.
 
@@ -34,6 +43,13 @@ need an agent at all.
 - `recap` failed every moment cut on ffmpeg builds without the `drawtext` filter (current
   Homebrew among them) and wrongly said the footage had rolled off. Moments now go out
   unlabelled instead.
+- With the lid closed, capture kept running against no camera, writing hundreds of MB of
+  errors while the watchdog reported a dead stream. The lid switch pauses it instead.
+- `OJOGATO_MCP_BIND=tailscale` failed under launchd, where the Tailscale app binary prints a
+  GUI error and exits 0. Only a real tailnet address is accepted now, with the network
+  interfaces as the fallback.
+- The watchdog could crash reading the recogniser's liveness file mid-write. The file is now
+  written atomically.
 
 ## [0.3.0] — 2026-09-24
 
