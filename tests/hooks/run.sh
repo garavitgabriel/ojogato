@@ -163,6 +163,21 @@ OUT=$(fx_exec OJOGATO_MCP_PUBLIC_URL=http://cam.example.ts.net:8790/ ojogato mcp
 fx_exec - ojogato mcp token >/dev/null 2>&1 && bad "mcp token with none set should fail" || ok "mcp token fails when unset"
 OUT=$(fx_exec OJOGATO_MCP_TOKEN=abc123 ojogato mcp token); [ "$OUT" = "abc123" ] && ok "mcp token prints it" || bad "mcp token: '$OUT'"
 
+# ------------------------------------------------------------------ 5. lid switch
+echo "▸ lid-watch"
+LH=$(mktemp -d); mkdir -p "$LH/bin"
+printf '#!/bin/bash\necho "$*" >> "%s/calls"\n' "$LH" > "$LH/bin/ojogato"; chmod +x "$LH/bin/ojogato"
+lid() { : > "$LH/calls"; OJOGATO_HOME="$LH" OJOGATO_LID_STATE="$1" bash "$REPO/src/bin/lid-watch.sh" 2>/dev/null; cat "$LH/calls"; }
+rm -f "$LH/PAUSED"; OUT=$(lid Yes); [ "$OUT" = "off --by-lid" ] && ok "lid closed while running → off --by-lid" || bad "lid closed: '$OUT'"
+echo lid > "$LH/PAUSED"; OUT=$(lid Yes); [ -z "$OUT" ] && ok "lid closed while paused → nothing" || bad "closed+paused: '$OUT'"
+echo lid > "$LH/PAUSED"; OUT=$(lid No); [ "$OUT" = "on" ] && ok "lid opened after a lid pause → on" || bad "lid opened: '$OUT'"
+: > "$LH/PAUSED"; OUT=$(lid No); [ -z "$OUT" ] && ok "lid opened after a manual off → stays off" || bad "manual off overridden: '$OUT'"
+rm -f "$LH/PAUSED"; OUT=$(lid No); [ -z "$OUT" ] && ok "lid open while running → nothing" || bad "open+running: '$OUT'"
+OUT=$(lid ""); [ -z "$OUT" ] && ok "no lid (desktop Mac) → nothing" || bad "no lid: '$OUT'"
+echo 'OJOGATO_LID_SWITCH="0"' > "$LH/config.env"; OUT=$(lid Yes); [ -z "$OUT" ] && ok "OJOGATO_LID_SWITCH=0 → nothing" || bad "switch off: '$OUT'"
+rm -rf "$LH"
+plutil -lint -s "$REPO/src/templates/com.ojogato.lid.plist.tmpl" >/dev/null 2>&1 && ok "lid plist template lints" || bad "lid plist template"
+
 [ -s "$FX_CURL_LOG" ] && { bad "something tried curl:"; cat "$FX_CURL_LOG"; }
 echo ""
 echo "▸ $PASS passed, $FAIL failed"

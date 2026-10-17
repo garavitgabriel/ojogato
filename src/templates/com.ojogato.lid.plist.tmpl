@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The lid is the switch on a MacBook: closed pauses Ojo de Gato, opened resumes it (unless
+     you paused it yourself with `ojogato off`). Not a camera service: it keeps running while
+     paused, because that is when it has to notice the lid opening. One ioreg read every 15s. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.ojogato.lid</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@OJOGATO_HOME@/bin/lid-watch.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>15</integer>
+  <key>StandardErrorPath</key><string>@OJOGATO_HOME@/logs/lid.err</string>
+</dict>
+</plist>

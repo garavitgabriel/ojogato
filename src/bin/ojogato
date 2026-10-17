@@ -10,10 +10,11 @@ APP="$OJOGATO_HOME/OjoGato.app"
 APP_BIN="$APP/Contents/MacOS/ojogato-capture"
 U=$(id -u)
 
-ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp"
+ALL_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp com.ojogato.lid"
 # Not camera services: `off` leaves them loaded. digest.sh idles unless DIGEST_MODE is
-# standalone, and the MCP server (opt-in, OJOGATO_MCP_ENABLED=1) reports paused itself.
-AUX_SERVICES="com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp"
+# standalone, the MCP server (opt-in, OJOGATO_MCP_ENABLED=1) reports paused itself, and the
+# lid switch has to keep watching while paused to notice the lid opening.
+AUX_SERVICES="com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp com.ojogato.lid"
 CAM_SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup"
 
 step() { printf '▸ %s\n' "$*"; }
@@ -274,7 +275,9 @@ except Exception: pass' 2>/dev/null)
 
 # --------------------------------------------------------------------- on / off
 cmd_off() {
-  touch "$OJOGATO_HOME/PAUSED"
+  # PAUSED records who paused: "lid" lets lid-watch.sh resume on open; empty (a manual off)
+  # means only `ojogato on` resumes.
+  if [ "$1" = "--by-lid" ]; then echo lid > "$OJOGATO_HOME/PAUSED"; else : > "$OJOGATO_HOME/PAUSED"; fi
   for L in $CAM_SERVICES; do launchctl bootout "gui/$U/$L" 2>/dev/null; done
   # ffmpeg can take a few seconds to exit after SIGTERM — wait until the camera
   # processes are actually gone before promising the light is out.
@@ -313,6 +316,7 @@ cmd_on() {
   [ -z "$(svc_pid com.ojogato.heartbeat)" ] && boot_svc com.ojogato.heartbeat
   # digest has no running pid between its 09:00/21:00 runs, so ask launchd whether it's loaded.
   launchctl list com.ojogato.digest >/dev/null 2>&1 || boot_svc com.ojogato.digest
+  launchctl list com.ojogato.lid >/dev/null 2>&1 || boot_svc com.ojogato.lid
   load_config
   if mcp_enabled && [ -z "$(svc_pid com.ojogato.mcp)" ]; then boot_svc com.ojogato.mcp; fi
   echo "▸ Ojo de Gato ON — stream + recording resuming (give it ~10s)."
@@ -620,6 +624,7 @@ usage: ojogato <command>
   setup      guided first-run: camera permission, Telegram, live URL
   on         resume streaming + recording (clears PAUSED)
   off        stop everything camera-related (privacy mode; watchdog silenced)
+             on a MacBook, closing the lid does this and opening it resumes
   status     services, newest recording age, disk use, last motion
   doctor     health checks with plain-English pass/fail
   report     send a Telegram report now (report.sh)
@@ -637,7 +642,7 @@ CMD="$1"
 case "$CMD" in
   setup)     cmd_setup "$@" ;;
   on)        cmd_on ;;
-  off)       cmd_off ;;
+  off)       cmd_off "$@" ;;
   status)    cmd_status ;;
   doctor)    cmd_doctor ;;
   report)    cmd_report "$@" ;;

@@ -125,7 +125,7 @@ The LLM only adds voice, and it's optional.
 ## Honest limitations
 
 - **No night vision** on built-in Mac cameras. Leave a light on, or use a USB camera with IR.
-- **The lid must stay open** to use a MacBook's built-in camera. Closing it cuts the feed.
+- **The lid must stay open** to use a MacBook's built-in camera. That makes the lid the switch: closing it pauses everything (no recording, no alerts, agents' digests go quiet) and opening it resumes. A manual `ojogato off` stays off until `ojogato on`.
 - **macOS only for now.** Linux support (an RTSP camera with systemd) is on the [roadmap](docs/roadmap.md).
 - **Recognition is good, not perfect.** Something that crosses the frame in under a second, in the dark, can be missed entirely.
 - **Cat vs dog isn't reliable** at this resolution, so both are reported as one "pet" class named from `OJOGATO_SUBJECT`. Recognition can't tell individual animals apart either, so pet names (`OJOGATO_PET_NAMES`) refer to the group, never to one pet.

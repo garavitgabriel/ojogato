@@ -80,8 +80,9 @@ When this runs from a scheduled job:
 The camera Mac has one switch, and you don't control it (the tools are read-only on
 purpose, so an agent can never turn the monitoring off):
 
-- `ojogato off` on the Mac (when home): camera, recording and alerts stop, and every
-  scheduled digest here goes `[SILENT]`.
-- `ojogato on` on the Mac (when leaving): everything resumes, digests included.
+- **Close the lid** (or `ojogato off`) when home: camera, recording and alerts stop, and
+  every scheduled digest here goes `[SILENT]`.
+- **Open the lid** (or `ojogato on`) when leaving: everything resumes, digests included.
+  A manual `ojogato off` stays off even with the lid open, until `ojogato on`.
 
 If asked to turn the camera on or off, explain this in one line.

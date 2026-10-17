@@ -15,7 +15,7 @@ REPO_DIR=$(cd "$(dirname "$0")" && pwd)
 OJOGATO_HOME="$HOME/.ojogato"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 U=$(id -u)
-SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp"
+SERVICES="com.ojogato.mediamtx com.ojogato.capture com.ojogato.record com.ojogato.motion com.ojogato.vision com.ojogato.cleanup com.ojogato.heartbeat com.ojogato.digest com.ojogato.mcp com.ojogato.lid"
 
 DRY_RUN=false
 LINK_MODE=false
@@ -401,8 +401,8 @@ for t in "$REPO_DIR"/src/templates/com.ojogato.*.plist.tmpl; do
   render "$t" "$LAUNCH_AGENTS/$(basename "$t" .tmpl)"
   PLIST_COUNT=$((PLIST_COUNT + 1))
 done
-PLIST_WANT=8   # 7 pipeline services + digest; the MCP template ships with src/mcp
-[ -f "$REPO_DIR/src/templates/com.ojogato.mcp.plist.tmpl" ] && PLIST_WANT=9
+PLIST_WANT=9   # 7 pipeline services + digest + lid; the MCP template ships with src/mcp
+[ -f "$REPO_DIR/src/templates/com.ojogato.mcp.plist.tmpl" ] && PLIST_WANT=10
 [ "$PLIST_COUNT" -eq "$PLIST_WANT" ] || warn "expected $PLIST_WANT launchd plist templates, found $PLIST_COUNT"
 
 if [ -f "$REPO_DIR/src/templates/mediamtx.yml.tmpl" ]; then
@@ -506,9 +506,9 @@ done
 
 if [ -f "$OJOGATO_HOME/PAUSED" ]; then
   warn "PAUSED flag present — camera services stay off. Loading heartbeat only; run 'ojogato on' when ready."
-  BOOT_LIST="com.ojogato.heartbeat com.ojogato.digest"
+  BOOT_LIST="com.ojogato.heartbeat com.ojogato.digest com.ojogato.lid"
 else
-  BOOT_LIST="com.ojogato.mediamtx"
+  BOOT_LIST="com.ojogato.mediamtx com.ojogato.lid"
 fi
 
 boot() { # boot <label>
