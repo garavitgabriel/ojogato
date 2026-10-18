@@ -4,7 +4,7 @@ v1 is macOS-only, single-camera, deterministic-only. These are the directions fo
 
 ## MCP server (shipped in v0.4.0)
 
-Any MCP-capable agent can query the camera: status and verified events as JSON, the snapshot and an event's best frame as images the agent can look at, and clips/recaps as tailnet links. Design: [mcp-server.md](mcp-server.md).
+Any MCP-capable agent can query the camera: status and verified events as JSON, the snapshot and an event's best frame as images the agent can look at, and clips/recaps as tailnet links or the video itself. Design: [mcp-server.md](mcp-server.md).
 
 ## Linux / VPS support
 

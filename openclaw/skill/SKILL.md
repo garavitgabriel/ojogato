@@ -1,6 +1,6 @@
 ---
 name: ojo-gato
-description: Check on whatever the Ojo de Gato home camera is watching (OJOGATO_SUBJECT in ~/.ojogato/config.env — cats, a dog, plants, the front door). Use whenever the user asks how the subject is doing, asks to check on them, asks for a camera update, or mentions "ojo gato" or the camera ("how are the cats", "check on the dog", "how are the plants", "camera check", "anything on the camera?", "see the cats"), or asks for the day's recap / highlights video. Reports deterministic motion-based activity and sends a live snapshot plus a last-movement clip, or a stitched recap of the day's key moments, to Telegram.
+description: Check on whatever the Ojo de Gato home camera is watching (OJOGATO_SUBJECT in ~/.ojogato/config.env — cats, a dog, the front door). Use whenever the user asks how the subject is doing, asks to check on them, asks for a camera update, or mentions "ojo gato" or the camera ("how are the cats", "check on the dog", "camera check", "anything on the camera?", "see the cats"), or asks for the day's recap / highlights video. Reports deterministic motion-based activity and sends a live snapshot plus a last-movement clip, or a stitched recap of the day's key moments, to Telegram.
 ---
 
 # Ojo de Gato Skill
