@@ -4,7 +4,7 @@ All notable changes to Ojo de Gato are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.4.0] — unreleased
+## [0.4.0] — 2026-10-20
 
 Any MCP-capable agent can now use Ojo de Gato, not only OpenClaw, and digests no longer
 need an agent at all.

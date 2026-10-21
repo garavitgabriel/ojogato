@@ -16,9 +16,7 @@ Ask your AI agent *"how are the cats?"* and get a live photo, real sightings and
 
 [Quickstart](#quickstart) · [Use it with your agent](#use-it-with-your-agent) · [What it watches](#what-it-watches) · [How it works](#how-it-works) · [Docs](#docs)
 
-<!-- DEMO GIF: replace this comment with
-<img src="docs/media/demo.gif" alt="Telegram chat: asking how the cats are, getting a live photo and sightings, then the day's recap video" width="360">
--->
+<img src="docs/media/demo.gif" alt="Telegram chat with an agent: the daily cat digests with live photos, then the day's recap video of a cat at the food bowls, full screen" width="360">
 
 </div>
 
